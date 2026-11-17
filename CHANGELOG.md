@@ -2,6 +2,21 @@
 
 Repository history. Existing in-game feature history remains in `src/game/constants.ts`; its dates/versions have not been independently verified. Package version `0.0.0`, game-save schema `4`, in-game feature version and document versions are separate identifiers.
 
+## 2026-11-17 — Ally areas prompt v1 (documentation only)
+
+- Added `docs/prompts/ALLY_AREAS.md`: a compact implementation prompt for ally-owned areas
+  plus a read-only 3D parcel tour, with output contract, six success criteria, review
+  fixtures and risks.
+- Verified before writing: the app already has a UI-only `ui.visit` target routed by
+  `Studio.resolveTarget()` into `BuildingScene` with `readOnly: true` (peer buildings only),
+  so the prompt extends that seam instead of adding a second 3D route, and `AllianceBot`
+  currently carries no area/structures.
+- Called out the two silent-failure traps explicitly: new save fields need
+  `validateGameState()`/`prepareLegacySave()` updates or every save returns `422`, and
+  read-only must be enforced in the reducer rather than by hiding UI.
+- Documentation only: no code, save, balance or prompt-runtime behaviour changed. Prompt
+  status is **proposed / NOT RUN**.
+
 ## 2026-11-17 — Next.js + SQLite persistence migration (v2)
 
 **Stack.** Replaced Vite 7 + `vite-plugin-singlefile` with Next.js 16.4.6 App Router
