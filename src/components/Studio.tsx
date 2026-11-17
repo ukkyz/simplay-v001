@@ -1,9 +1,11 @@
+"use client";
+
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ARCHETYPE_BY_ID, ZONE_META } from "../game/constants";
-import { planStats } from "../game/plans";
-import type { Building, FloorPlan, Project } from "../game/types";
-import { useGame } from "../state/store";
-import { cn } from "../utils/cn";
+import { ARCHETYPE_BY_ID, ZONE_META } from "@/game/constants";
+import { planStats } from "@/game/plans";
+import type { Building, FloorPlan, Project } from "@/game/types";
+import { useGame } from "@/state/store";
+import { cn } from "@/utils/cn";
 import BuildingScene, { type NpcSpec, type SceneMode } from "./BuildingScene";
 import FloorPlanEditor from "./FloorPlanEditor";
 import { Btn, Chip, Icon, KV, Meter, Panel } from "./ui";

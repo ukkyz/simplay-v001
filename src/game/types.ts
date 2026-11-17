@@ -138,9 +138,21 @@ export interface Project {
   draft?: FloorPlan | null;
 }
 
+/**
+ * Non-secret advisor preferences.
+ *
+ * `baseUrl` / `apiKey` are kept as always-empty fields for backward compatibility
+ * with schema-4 saves and imports; they are never populated by the app any more.
+ * Live model credentials are operator-owned server environment values (see
+ * src/server/ai/config.ts). Anything written here is client-visible and
+ * persisted, so it must never hold a secret.
+ */
 export interface AIConfig {
-  baseUrl: string;
-  apiKey: string;
+  /** Removed from new saves; only a legacy schema-4 import may carry it. */
+  baseUrl?: string;
+  /** Removed from new saves; a non-empty value in an import is rejected. */
+  apiKey?: string;
+  /** Non-secret display preference only; the served model is operator-configured. */
   model: string;
   temperature: number;
   enabled: boolean;

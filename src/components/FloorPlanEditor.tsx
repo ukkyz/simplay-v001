@@ -1,9 +1,11 @@
+"use client";
+
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ZONE_META } from "../game/constants";
-import { clonePlan, planStats } from "../game/plans";
-import { DOOR, FLOOR, GLASS, VOID, WALL } from "../game/plans";
-import type { Cell, FloorPlan, PropKind, ZoneKind } from "../game/types";
-import { cn } from "../utils/cn";
+import { ZONE_META } from "@/game/constants";
+import { clonePlan, planStats } from "@/game/plans";
+import { DOOR, FLOOR, GLASS, VOID, WALL } from "@/game/plans";
+import type { Cell, FloorPlan, PropKind, ZoneKind } from "@/game/types";
+import { cn } from "@/utils/cn";
 import { Btn, Chip, Icon } from "./ui";
 
 type Tool = "wall" | "floor" | "door" | "glass" | "void" | "zone" | "prop" | "eraser";

@@ -1,11 +1,13 @@
+"use client";
+
 import React from "react";
-import { AREA_META, LEVELS } from "../game/constants";
-import { SCREENS, flows } from "../game/engine";
-import { formatLL } from "../game/geo";
-import type { Screen } from "../game/types";
-import { useGame } from "../state/store";
-import { cn } from "../utils/cn";
-import { Chip, Icon, Meter } from "./ui";
+import { AREA_META, LEVELS } from "@/game/constants";
+import { SCREENS, flows } from "@/game/engine";
+import { formatLL } from "@/game/geo";
+import type { Screen } from "@/game/types";
+import { useGame } from "@/state/store";
+import { cn } from "@/utils/cn";
+import { Btn, Chip, Icon, Meter } from "./ui";
 
 export const fmt = (n: number, d = 0) =>
   n.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -309,6 +311,77 @@ export function Toast() {
     >
       <span className="num mr-2" style={{ color: c }}>▸</span>
       {ui.toast.text}
+    </div>
+  );
+}
+
+/* ------------------------------- save badge ------------------------------- */
+
+/**
+ * Persistence status. The player must always be able to tell whether the last
+ * few seconds of progress reached the server, and to retry after a failure.
+ */
+export function SaveBadge() {
+  const { persistence, retrySave } = useGame();
+  const { phase, status, revision, conflict } = persistence;
+
+  const tone =
+    phase !== "ready" || conflict || status.kind === "error"
+      ? "bad"
+      : status.kind === "saved"
+        ? "good"
+        : status.kind === "saving"
+          ? "busy"
+          : "idle";
+
+  const label =
+    conflict
+      ? "CONFLICT"
+      : phase === "onboarding"
+        ? "NOT SAVED"
+        : status.kind === "saving"
+          ? "SAVING…"
+          : status.kind === "saved"
+            ? "SAVED"
+            : status.kind === "error"
+              ? "UNSAVED"
+              : status.kind === "conflict"
+                ? "CONFLICT"
+                : "UNSAVED";
+
+  const detail =
+    status.kind === "error"
+      ? (status.code === "invalid_save"
+          ? "Server rejected this snapshot — export it from the Save screen."
+          : `Retrying in ${Math.max(1, Math.round(status.retryInMs / 1000))}s`)
+      : status.kind === "conflict"
+        ? "Autosave paused"
+        : revision > 0
+          ? `rev ${revision}`
+          : "rev —";
+
+  return (
+    <div className="pointer-events-none fixed bottom-2 left-3 z-[820] flex items-center gap-2">
+      <span
+        className={cn(
+          "num flex items-center gap-1.5 border px-1.5 py-[3px] text-[9px] tracking-[0.14em]",
+          tone === "good" && "border-teal/50 bg-teal/10 text-teal",
+          tone === "bad" && "border-coral/55 bg-coral/10 text-coral",
+          tone === "busy" && "border-signal/50 bg-signal/10 text-signal",
+          tone === "idle" && "border-line bg-ink-900/80 text-dim",
+        )}
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-current" />
+        {label}
+      </span>
+      <span className="num text-[9px] text-dim/80">{detail}</span>
+      {(status.kind === "error" || conflict) && (
+        <span className="pointer-events-auto">
+          <Btn size="sm" variant="ghost" onClick={retrySave} className="!px-1.5 !py-0 !text-[9px]">
+            <Icon.arrow size={10} /> retry
+          </Btn>
+        </span>
+      )}
     </div>
   );
 }

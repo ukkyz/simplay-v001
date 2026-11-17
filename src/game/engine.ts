@@ -389,6 +389,9 @@ export function flows(s: GameState) {
   const foodDemand = crew * 0.4; // 1 ration unit = 2.5 crew-hours
   const revenue = brownout || food < foodDemand ? upkeep * 0.35 * 0.5 : upkeep * 0.35;
   return {
+    // Negative net demand is a real state: a claim can generate more power than
+    // it draws (e.g. a half-built smelter drawing at 25%). Validation must accept
+    // it, so it is not floored here.
     produced: Math.round(produced),
     demanded: Math.round(demanded),
     food: food * eff,

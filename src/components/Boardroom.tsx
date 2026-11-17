@@ -1,9 +1,12 @@
+"use client";
+
 import { useEffect, useRef, useState } from "react";
-import { EXEC_META } from "../game/constants";
-import { askExec, stateDigest, SUGGESTIONS } from "../game/advisor";
-import type { AIConfig, ChatMessage, ExecRole } from "../game/types";
-import { useGame } from "../state/store";
-import { cn } from "../utils/cn";
+import { EXEC_META } from "@/game/constants";
+import { askExec, SUGGESTIONS } from "@/game/advisor";
+import { stateDigest } from "@/game/digest";
+import type { AIConfig, ChatMessage, ExecRole } from "@/game/types";
+import { useGame } from "@/state/store";
+import { cn } from "@/utils/cn";
 import { Btn, Chip, Icon, KV, Meter, Panel } from "./ui";
 
 const ROLES: ExecRole[] = ["cto", "cfo", "coo"];
@@ -45,9 +48,8 @@ export default function Boardroom() {
 
     for (let i = 0; i < roles.length; i++) {
       const r = roles[i];
-      const exec = state.execs.find((e) => e.role === r)!;
       const history = [...ui.chat, ceoMsg];
-      const res = await askExec(r, history, text.trim(), state, exec.ai);
+      const res = await askExec(r, history, text.trim(), state);
       setUi((u) => ({
         chat: u.chat.map((m) =>
           m.id === pendings[i].id
@@ -71,7 +73,9 @@ export default function Boardroom() {
 
         {state.execs.map((e) => {
           const m = EXEC_META[e.role];
-          const live = e.ai.enabled && !!e.ai.apiKey.trim();
+          // "LIVE MODEL" is a server capability, not a browser key: the advisor
+          // route reports whether a provider is configured for this deployment.
+          const live = e.ai.enabled;
           return (
             <div
               key={e.role}
@@ -112,9 +116,9 @@ export default function Boardroom() {
                   role={e.role}
                   ai={e.ai}
                   onSave={(patch) => dispatch({ type: "setAI", role: e.role, patch })}
-                  onTest={async (cfg) => {
+                  onTest={async () => {
                     setBusy(true);
-                    const res = await askExec(e.role, [], "Report your current load and your top concern in one sentence.", state, cfg);
+                    const res = await askExec(e.role, [], "Report your current load and your top concern in one sentence.", state);
                     setUi((u) => ({
                       chat: [
                         ...u.chat,
@@ -123,7 +127,12 @@ export default function Boardroom() {
                       ] as ChatMessage[],
                     }));
                     setBusy(false);
-                    toast(res.source === "live-api" ? `${e.ai.model} responded.` : `Fell back to local advisor — ${res.error ?? "endpoint not enabled"}`, res.source === "live-api" ? "good" : "bad");
+                    toast(
+                      res.source === "live-api"
+                        ? "The configured model responded."
+                        : `Local advisor — ${res.error ?? "no live model configured on this server"}`,
+                      res.source === "live-api" ? "good" : "bad",
+                    );
                   }}
                 />
               )}
@@ -310,7 +319,7 @@ function ModelConfig({
   role: ExecRole;
   ai: AIConfig;
   onSave: (patch: Partial<AIConfig>) => void;
-  onTest: (cfg: AIConfig) => void;
+  onTest: () => void;
 }) {
   const [local, setLocal] = useState<AIConfig>(ai);
   useEffect(() => setLocal(ai), [ai]);
@@ -318,42 +327,57 @@ function ModelConfig({
   return (
     <div className="rise mt-3 border-t border-line pt-2.5">
       <div className="eyebrow mb-1.5" style={{ color: m.color }}>
-        {role} model endpoint · OpenAI-compatible /chat/completions
+        {role} advisor · server-proxied model
       </div>
       <div className="flex flex-col gap-1.5">
-        <label className="block">
-          <span className="num text-[9px] text-dim">BASE URL</span>
-          <input className="field mt-0.5" value={local.baseUrl} placeholder="https://api.openai.com/v1" onChange={(e) => setLocal({ ...local, baseUrl: e.target.value })} />
-        </label>
-        <div className="grid grid-cols-2 gap-1.5">
-          <label className="block">
-            <span className="num text-[9px] text-dim">MODEL</span>
-            <input className="field mt-0.5" value={local.model} placeholder="gpt-4o-mini" onChange={(e) => setLocal({ ...local, model: e.target.value })} />
-          </label>
-          <label className="block">
-            <span className="num text-[9px] text-dim">TEMPERATURE {local.temperature.toFixed(2)}</span>
-            <input type="range" min={0} max={1.4} step={0.05} value={local.temperature} onChange={(e) => setLocal({ ...local, temperature: Number(e.target.value) })} className="mt-2 w-full accent-[#35d6c0]" />
-          </label>
+        <div className="num border border-line bg-ink-950/60 px-2 py-1.5 text-[9.5px] leading-snug text-dim">
+          Provider endpoint, model and API key are configured by the operator on the server
+          (<span className="text-mist">SIMPLAYZ_AI_*</span>). They are never stored in your save,
+          exported files or this browser. With no provider configured the grounded local advisor
+          answers instead.
         </div>
         <label className="block">
-          <span className="num text-[9px] text-dim">API KEY (stored locally in this browser only)</span>
-          <input className="field mt-0.5" type="password" value={local.apiKey} placeholder="sk-…" onChange={(e) => setLocal({ ...local, apiKey: e.target.value })} />
+          <span className="num text-[9px] text-dim">PREFERRED MODEL (display only)</span>
+          <input
+            className="field mt-0.5"
+            value={local.model}
+            placeholder="unset — server default"
+            onChange={(e) => setLocal({ ...local, model: e.target.value })}
+          />
+        </label>
+        <label className="block">
+          <span className="num text-[9px] text-dim">TEMPERATURE {local.temperature.toFixed(2)}</span>
+          <input
+            type="range"
+            min={0}
+            max={1.4}
+            step={0.05}
+            value={local.temperature}
+            onChange={(e) => setLocal({ ...local, temperature: Number(e.target.value) })}
+            className="mt-2 w-full accent-[#35d6c0]"
+          />
         </label>
         <label className="flex items-center gap-2">
-          <input type="checkbox" checked={local.enabled} onChange={(e) => setLocal({ ...local, enabled: e.target.checked })} className="accent-[#35d6c0]" />
-          <span className="num text-[10px] text-mist">Route {role.toUpperCase()} to this endpoint</span>
+          <input
+            type="checkbox"
+            checked={local.enabled}
+            onChange={(e) => setLocal({ ...local, enabled: e.target.checked })}
+            className="accent-[#35d6c0]"
+          />
+          <span className="num text-[10px] text-mist">Route {role.toUpperCase()} through the live model when available</span>
         </label>
         <div className="mt-1 flex gap-1.5">
           <Btn size="sm" variant="primary" onClick={() => onSave(local)}>
-            <Icon.check size={12} /> Save
+            <Icon.check size={12} /> Save preferences
           </Btn>
-          <Btn size="sm" variant="teal" disabled={!local.enabled || !local.apiKey.trim()} onClick={() => onTest(local)}>
+          <Btn size="sm" variant="teal" disabled={!local.enabled} onClick={onTest}>
             Test connection
           </Btn>
         </div>
         <div className="mt-1">
-          <KV k="System prompt" v={`${m.system.length} chars · fixed`} />
+          <KV k="System prompt" v={`${m.system.length} chars · v2 server proxy`} />
           <KV k="Fallback" v="grounded local advisor" tone="#35d6c0" />
+          <KV k="Credentials in save" v="none" tone="#35d6c0" />
         </div>
       </div>
     </div>

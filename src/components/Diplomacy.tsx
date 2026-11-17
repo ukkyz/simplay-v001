@@ -1,10 +1,12 @@
+"use client";
+
 import { useState } from "react";
-import { ARCHETYPE_BY_ID, BASE_PRICES, MARKET, ROAD_GRADES, TRADE } from "../game/constants";
-import { flows, priceFor, systemMods, tradeCapacity } from "../game/engine";
-import { formatLL, haversineKm } from "../game/geo";
-import type { AllianceBot, Commodity } from "../game/types";
-import { useGame } from "../state/store";
-import { cn } from "../utils/cn";
+import { ARCHETYPE_BY_ID, BASE_PRICES, MARKET, ROAD_GRADES, TRADE } from "@/game/constants";
+import { flows, priceFor, systemMods, tradeCapacity } from "@/game/engine";
+import { formatLL, haversineKm } from "@/game/geo";
+import type { AllianceBot, Commodity } from "@/game/types";
+import { useGame } from "@/state/store";
+import { cn } from "@/utils/cn";
 import { Btn, Chip, Icon, KV, Meter, Panel } from "./ui";
 import { Stat } from "./Pipeline";
 import { fmt } from "./Shell";
@@ -168,7 +170,7 @@ export default function Diplomacy() {
         <Panel title="Netcode status" accent="#ff6a55" bodyClass="p-3">
           <KV k="Mode" v={state.netMode === "local-sim" ? "LOCAL SIMULATION" : "LIVE"} tone={state.netMode === "local-sim" ? "#f2a33c" : "#35d6c0"} />
           <KV k="Authority" v="client-side reducer" />
-          <KV k="Persistence" v="localStorage (schema 4)" />
+          <KV k="Persistence" v="SQLite snapshot · schema 4" />
           <KV k="Peer agents" v={`${state.remote.length} simulated CEOs`} />
           <KV k="Grid" v={`${f.produced}/${f.demanded} kW`} tone={f.brownout ? "#ff6a55" : "#35d6c0"} />
           <p className="mt-2 border-l-2 border-coral/60 pl-2 text-[10px] leading-snug text-mist">

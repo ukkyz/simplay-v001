@@ -1,5 +1,7 @@
+"use client";
+
 import React from "react";
-import { cn } from "../utils/cn";
+import { cn } from "@/utils/cn";
 
 /* ------------------------------- Icons ------------------------------- */
 type IP = { className?: string; size?: number };

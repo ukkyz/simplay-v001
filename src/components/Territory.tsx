@@ -1,11 +1,13 @@
+"use client";
+
 import { useEffect, useRef, useState } from "react";
-import { AREA_META, ARCHETYPES, ARCHETYPE_BY_ID, EXEC_META, PHASE_CONFIG, TUNABLES } from "../game/constants";
-import { flows, siteLL, systemMods } from "../game/engine";
-import { formatLL } from "../game/geo";
-import { PHASES } from "../game/types";
-import type { ExecRole } from "../game/types";
-import { useGame } from "../state/store";
-import { cn } from "../utils/cn";
+import { AREA_META, ARCHETYPES, ARCHETYPE_BY_ID, EXEC_META, PHASE_CONFIG, TUNABLES } from "@/game/constants";
+import { flows, siteLL, systemMods } from "@/game/engine";
+import { formatLL } from "@/game/geo";
+import { PHASES } from "@/game/types";
+import type { ExecRole } from "@/game/types";
+import { useGame } from "@/state/store";
+import { cn } from "@/utils/cn";
 import { Btn, Chip, Icon, KV, Meter, Panel, Sparkline } from "./ui";
 import { BuildingCondition, MAX_PIPELINE, PIPELINE_NOTE, PhaseStrip, ProjectCard, Stat } from "./Pipeline";
 import { compact, fmt } from "./Shell";

@@ -1,3 +1,5 @@
+"use client";
+
 import { useRef, useState } from "react";
 import {
   ARCHETYPES,
@@ -9,11 +11,12 @@ import {
   PHASE_CONFIG,
   TRADE,
   TUNABLES,
-} from "../game/constants";
-import { flows, systemMods } from "../game/engine";
-import { PHASES } from "../game/types";
-import { useGame } from "../state/store";
-import { cn } from "../utils/cn";
+} from "@/game/constants";
+import { flows, systemMods } from "@/game/engine";
+import { PHASES } from "@/game/types";
+import { GAME_SAVE_SCHEMA, validateGameState } from "@/server/gameSave";
+import { useGame, type PersistenceView } from "@/state/store";
+import { cn } from "@/utils/cn";
 import { Btn, Chip, Icon, KV, Panel } from "./ui";
 import { fmt } from "./Shell";
 
@@ -21,7 +24,7 @@ const TABS = ["Overview", "Numbers", "Catalogue", "Questions", "Changelog", "Sav
 type Tab = (typeof TABS)[number];
 
 export default function GDD() {
-  const { state, dispatch, toast, hardReset } = useGame();
+  const { state, toast, hardReset, persistence, exportState, importState } = useGame();
   const [tab, setTab] = useState<Tab>("Questions");
   const answered = state.questions.filter((q) => q.answer.trim()).length;
   const fileRef = useRef<HTMLInputElement>(null);
@@ -66,7 +69,9 @@ export default function GDD() {
           <SaveTab
             fileRef={fileRef}
             onExport={() => {
-              const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+              // Credentials are stripped by `exportState` (the API-key fields are
+              // always empty in the new model, but exports must never regress).
+              const blob = new Blob([JSON.stringify(exportState(), null, 2)], { type: "application/json" });
               const a = document.createElement("a");
               a.href = URL.createObjectURL(blob);
               a.download = `simplayz-${state.company.replace(/\s+/g, "-").toLowerCase()}-h${state.economy.tick}.json`;
@@ -76,18 +81,27 @@ export default function GDD() {
             }}
             onImport={async (file: File) => {
               try {
+                if (file.size > 1_500_000) throw new Error("file is larger than 1.5 MB");
                 const parsed = JSON.parse(await file.text());
-                if (parsed?.schema !== 4) throw new Error(`schema ${parsed?.schema} ≠ 4`);
-                dispatch({ type: "hydrate", state: parsed });
-                toast("Save imported and hydrated.", "good");
+                if (parsed?.schema !== GAME_SAVE_SCHEMA)
+                  throw new Error(`schema ${parsed?.schema} is not ${GAME_SAVE_SCHEMA}`);
+                // Full structural + reference validation, not a schema-number check.
+                const validation = validateGameState(parsed);
+                if (!validation.ok || !validation.state)
+                  throw new Error(`validation failed (${validation.errors.slice(0, 4).join(", ")})`);
+                await importState(validation.state);
               } catch (e) {
                 toast(`Import refused — ${(e as Error).message}`, "bad");
               }
             }}
             onReset={() => {
-              hardReset();
-              toast("Registry wiped. Back to the claim form.", "bad");
+              const ok = window.confirm(
+                "Delete the server save for this anonymous session?\n\nThis cannot be undone and it also clears the optional advisor preferences held in that save. The browser's legacy localStorage copy is cleared too. Export a JSON save first if you want a backup.",
+              );
+              if (!ok) return;
+              void hardReset();
             }}
+            persistence={persistence}
           />
         )}
       </div>
@@ -456,11 +470,13 @@ function SaveTab({
   onExport,
   onImport,
   onReset,
+  persistence,
 }: {
   fileRef: React.MutableRefObject<HTMLInputElement | null>;
   onExport: () => void;
   onImport: (f: File) => void;
   onReset: () => void;
+  persistence: PersistenceView;
 }) {
   const { state } = useGame();
   return (
@@ -468,8 +484,12 @@ function SaveTab({
       <div className="eyebrow">§3 Persistence</div>
       <h3 className="display mt-1 text-[26px] leading-none text-chalk">SAVE &amp; STATE</h3>
       <div className="panel mt-3 p-3">
-        <KV k="Schema" v={state.schema} />
-        <KV k="Storage key" v="simplayz.save.v4 (localStorage)" />
+        <KV k="Game-save schema" v={state.schema} />
+        <KV k="Save storage" v="SQLite on the game server (durable snapshot)" />
+        <KV k="Save revision" v={persistence.revision || "—"} />
+        <KV k="Autosave status" v={persistence.status.kind.toUpperCase()} />
+        <KV k="Legacy key (read-only)" v="simplayz.save.v4 (browser, migrated one-time)" />
+        <KV k="Credentials in save" v="none — server-side operator keys" tone="#35d6c0" />
         <KV k="CEO / company" v={`${state.ceoName} · ${state.company}`} />
         <KV k="Claim centre" v={`${state.claim!.center.lat.toFixed(4)}, ${state.claim!.center.lng.toFixed(4)} (${state.claim!.placedBy})`} />
         <KV k="Sim hour" v={`${state.economy.tick} (day ${(state.economy.tick / 24).toFixed(1)})`} />
@@ -498,9 +518,11 @@ function SaveTab({
           />
         </div>
         <p className="num mt-3 border-l-2 border-signal/60 pl-2 text-[10px] leading-snug text-dim">
-          Client-side persistence is a prototype decision, not an architecture. The moment Q2 is answered, the
-          reducer stays and the storage adapter swaps — the tick function is already pure, so a server can run
-          the identical simulation authoritatively.
+          Progress is persisted as a complete snapshot in the server&apos;s SQLite database, keyed to this
+          browser&apos;s anonymous session cookie. The simulation still runs in your browser. Clearing site
+          data or the session cookie loses access to that save unless you exported it — there is no account
+          recovery yet. Reset deletes the server save for this session and clears the in-game advisor
+          preferences; it does not delete the anonymous session row.
         </p>
       </div>
     </div>

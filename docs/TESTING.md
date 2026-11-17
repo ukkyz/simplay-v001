@@ -1,50 +1,82 @@
-# Validation guide — v1.0
+# Validation guide — v2 (Next.js + SQLite migration)
 
-## Verified baseline (2026-11-16)
-
-On Node 22.22.3 / npm 10.9.8:
+## Verified baseline (2026-11-17, Node 22.22.3 / npm 10.9.8)
 
 | Check | Result |
 | --- | --- |
-| `npm ci` | PASS; 106 packages installed; npm audit reported 0 vulnerabilities at execution time |
-| `npx tsc --noEmit` | PASS |
-| `npm run build` | PASS; Vite single-file output `dist/index.html` |
-| Browser gameplay, live tiles, geolocation, WebGL, save/reload | NOT RUN in this documentation audit |
-| Production AI evaluation | NOT RUN; no authorized provider/key/model evaluation available |
+| `npm ci` | PASS with `--nodedir=/usr/local`; the plain run fails in this sandbox because node-gyp cannot reach `nodejs.org` for Node headers (network policy, not a repo defect) |
+| `npm run typecheck` (`tsc --noEmit`, strict) | PASS |
+| `npm test` (54 assertions across 6 files) | PASS |
+| `npm run build` (`next build`, Turbopack) | PASS |
+| `npm run db:migrate` → `0000_init.sql` applied, idempotent on re-run | PASS |
+| `npm run db:backup` → snapshot + `integrity_check: ok` | PASS |
+| `npx tsx scripts/smoke-http.ts` against `next dev` | PASS 11/11 |
+| `npx tsx scripts/smoke-http.ts` against `next start` (port 3100) | PASS 11/11 |
+| Same-database save after a real dev-server restart (`SMOKE_EXPECT_TOKEN`) | PASS 12/12 |
+| Browser gameplay (Leaflet tiles, WebGL interiors, pointer lock, full onboarding) | **NOT RUN** — no browser/GPU tooling in this environment |
+| Live model/provider evaluation | **NOT RUN** — no authorized provider/key; no player data sent |
 
-These are baseline checks, not proof of correctness/security or a guarantee that services work. There is no test runner, lint script or CI workflow. Do not invent `npm test` results. `dist/` is generated and ignored.
+**What the automated tests are.** `tests/save-api.test.ts`, `tests/legacy-migration.test.ts`
+and `tests/advisor-route.test.ts` import the real Next.js route handlers and run them
+against a **real better-sqlite3 database** in a temp directory (real migrations, real
+transactions). `tests/advisor-route.test.ts` replaces `fetch`, so it is a *mocked*
+integration test: it proves credential containment, allowlisting, timeout and fallback
+wiring, not model quality. `tests/save-queue.test.ts` drives the autosave scheduler with
+an injected clock. `tests/client-boundary.test.ts` is a static source audit.
 
-## Smoke protocol for the next runtime change
+Compilation and HTTP checks do not prove gameplay correctness, visual fidelity, or
+map/WebGL lifecycle safety.
 
-Use a disposable browser profile/save. Do not reset a player's real save. Record commit, browser/device, start fixture, speed, actions, observed outcome, console/network errors and pass/fail. Pause time before inspecting values; screenshot results where useful. A browser's inability to reach a remote service is a limitation to report, not a reason to claim gameplay passed.
+## Covered contracts
 
-| Case | Procedure | Expected observation / diagnostic |
+| Area | Test | Expectation |
 | --- | --- | --- |
-| Happy: new company | Start fresh, enter CEO/company, click map point, register; navigate keys 1–6 | Claim and console appear; screens switch without uncaught errors; map attribution remains visible |
-| Happy: demo | Load demo, inspect territory/pipeline/studio/board/diplomacy | Existing assets and simulated neighbors visible; local board advice works without a key |
-| Happy: construction | Select valid empty matching-tier site, commission, observe all phases with sufficient funds/materials | Project/site stay linked; Deploy produces one building using the draft plan; occupied site cannot be recommissioned |
-| Edge: clock | Pause, observe tick; run 1×/4×/16×, then pause | Pause stops tick advancement; faster speeds increase cadence. Do not assume exact wall-clock under browser throttling |
-| Edge: limits | Attempt seventh active project, wrong sector/tier, occupied site | State remains valid; cap logs alert; no duplicate project/building assignment |
-| Edge: plan consistency | Edit project draft, deploy, compare 2D and 3D; exit pointer lock and switch screen | Authored layout retained; doors/walls/collision coherent; scene/map listeners cleaned up on remount |
-| Edge: save | At 1× pause for >700 ms then reload; repeat reload while actively at 4×/16× | Normal paused save should restore; accelerated-save staleness is a known risk (R3), not a passing guarantee |
-| Failure: resource block | Reach Approve with insufficient money/materials, then restore resources | Blocked reason shown; gate rechecks and recovers on subsequent tick |
-| Failure: AI | Disable AI/use empty key; separately simulate non-OK/empty response | Local response for no key; network/format error surfaces with fallback. Hanging-request recovery is NOT implemented |
-| Failure: import/storage | In disposable profile import bad JSON/wrong schema, then test malformed schema-4 save separately | Bad JSON/wrong schema refused; malformed matching-schema data may crash (R2). Quota failure may be silent; capture as risk |
-| Failure: geolocation/tiles | Deny geolocation; block tile network request | Manual point/demo remain alternative onboarding paths; record tile-failure UX without assuming offline tiles exist |
+| Happy path | `save-api` → "creates a session cookie, writes rev 1, reads it back, then increments" | 43-char token, `HttpOnly`+`SameSite=lax`, rev 1 → 2 |
+| Concurrency | "accepts exactly one of two writes that both claim revision 2" | exactly one 200, one 409 with `currentRevision` |
+| Malformed save | "rejects a malformed save … last valid save untouched" | 422 + `problems`, stored rev unchanged |
+| Dangling references | "rejects a save with a dangling entity reference" | 422 |
+| Unauthenticated | "refuses unauthenticated reads and writes" | 401 |
+| CSRF | "blocks cross-origin and origin-less state changes" | 403 both |
+| Content type / size | "rejects non-JSON content types and oversized bodies" | 415 / 413 |
+| DB failure | "surfaces a database write failure as 503 without leaking internals" | 503, no table/path text |
+| Isolation | "never returns another session's save", "reset deletes only the caller's save" | B unchanged by A |
+| Secrets | "rejects a payload that still carries a credential", "strips … stored and returned saves" | 422, no echo, no `apiKey`/`baseUrl` |
+| Legacy migration | `legacy-migration` → validation, redaction, debt/bounds preservation, broken plan | valid blob migrates at rev 1 without the old key; invalid does not |
+| Versioning | "reports schemaVersion alongside a revision" | save schema 4, revision 2, ledger present |
+| Autosave cadence | `save-queue` → "at least every 5 s while snapshots keep arriving" | ≥6 writes / 30 s @16×, gaps 4–5 s, no per-tick burst |
+| Single in-flight | "coalesces many submissions into one in-flight write" | `maxInFlight === 1` |
+| Failure/retry | "keeps the pending snapshot and retries with backoff" | snapshot retained, backoff capped at 9 s |
+| Conflict pause | "pauses on a revision conflict and never overwrites silently" | zero further writes until resolved |
+| Invalid payload | "stops retrying a payload the server rejected as invalid" | exactly one attempt, snapshot kept |
+| Teardown | "dispose clears timers" | zero writes after dispose (StrictMode remount safety) |
+| Advisor | `advisor-route` | key server-side and never echoed, allowlists, timeout→fallback, 500/empty→fallback, 429, history trim, 401/403 |
+| Loading gates | `client-boundary` → "gates simulation ticks behind the save phase" | tick effect returns unless `phase === "ready"` |
+| SSR boundary | `client-boundary` → ssr:false page, layout imports, client directives, nodejs runtime, 0.0.0.0 scripts | as stated |
 
-## Targeted regression contracts
+## Manual browser smoke protocol
 
-For engine changes, add a focused test harness if in scope. Fixtures should use `createGame`, stable IDs and controlled `Math.random`/`Date.now` (restore mocks afterward). Seeded geo/plan helpers do not make the whole engine deterministic. Avoid snapshots with keys or real player coordinates.
+Not run in this environment. Use a disposable browser profile and a disposable
+database (`SIMPLAYZ_DB_PATH=/tmp/smoke.sqlite`), and record browser/device/commit.
 
-- Construction: valid/invalid start, six-project cap, funding unblock, first/second QA rework and third-attempt signoff; draft promotion exactly once.
-- Money/materials: conservation across approval, build phase overshoot, rework, cancel-before-spend, negative cash and late change requests. Agree expected behavior before locking exploit-like behavior into tests.
-- Trades: cooldown at hours 5 vs 6, cap, zero/negative/non-finite/fractional quantities, insufficient bot purse/player stock, forbidden commodities; only successful trade changes stocks/relations/cooldown.
-- Operations: power equality vs 1 kW short, condition 40 vs below 40, zero food, exact/over capacity, maintenance insufficient funds, price bounds and level thresholds.
-- Persistence: full shape/reference validation, wrong/older schema, corrupt data, secret redaction, quota failures, accelerated saving and explicit migration/reset policy where touched.
-- Presentation: StrictMode mount/unmount, Leaflet layers/listeners, Three.js disposal, keyboard typing guard, pointer-lock exit, reachable navigation and OSM attribution.
+| Case | Procedure | Expected |
+| --- | --- | --- |
+| Onboarding + save badge | Fresh profile → register a company | Console appears, badge reaches `SAVED`, no hydration warning, one map instance |
+| Demo | Reload → "Skip ahead" on a fresh session | Pre-rolled city at revision 1 |
+| OSM map | Inspect tiles + attribution | Tiles load, attribution visible, no duplicate map after a screen switch |
+| Construction | Commission a Tier-1 site with funds | Phases advance, deploy creates exactly one building |
+| Plan editing | Edit draft cells, deploy, compare 2D/3D | Layout retained, scene rebuilt without leaked WebGL contexts |
+| 3D entry/exit | FPS mode → pointer lock → Esc → switch screen | Pointer lock released, listeners removed, no console errors |
+| Board fallback | Ask the CTO with no `SIMPLAYZ_AI_API_KEY` | Local advice with a `LOCAL ADVISOR` label |
+| Save/reload | Play 30 s at 16×, reload | Progress within the last ~4 s restored, revision increased |
+| Separate sessions | Second profile | Independent company; first unaffected |
+| Server restart | Stop/start the dev server with the same `SIMPLAYZ_DB_PATH` | Same company resumes (covered at HTTP level above) |
+| Conflict | Two tabs on one session, both play, wait for the second write | `409` → conflict screen, autosave paused, both choices work |
+| Network failure | DevTools → offline, keep playing | Badge `UNSAVED` + retry, game keeps running, unload guard appears; back online → saved |
+| Legacy migration | Seed `localStorage["simplayz.save.v4"]` with an old save (no server save) | Migration offer, validated, uploaded once, local copy cleared after ack |
+| Legacy + server | Seed legacy blob with an existing server save | Explicit choice; server save intact until the player confirms |
 
-Known gaps are not asserted as desired long-term behavior. When fixing one, write a regression test for the agreed correction and update `DECISIONS.md`.
+## Manual checks that remain OUT OF SCOPE / NOT RUN
 
-## Prompt evaluation record
-
-For each prompt revision record: prompt version, expected output contract, fixture ID, exact provider/model version, temperature, date, request settings, redacted response, pass/fail against each criterion, latency/cost if available, and limitations. Include happy/edge/failure. Mocked API tests prove integration handling, not live-model compliance. Only claim production-model validation after authorized runs on that actual model and temperature.
+- Real provider calls (`SIMPLAYZ_AI_*`) — needs an authorized key and budget.
+- Mobile/touch interiors (pointer lock does not exist on touch devices).
+- Multi-instance deployment, process-manager restarts under load, WAL on network FS.
