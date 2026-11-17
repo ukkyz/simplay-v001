@@ -1,9 +1,11 @@
+"use client";
+
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { useEffect, useRef } from "react";
-import { ZONE_META } from "../game/constants";
-import type { FloorPlan, PropKind, ZoneKind } from "../game/types";
-import { isSolid } from "../game/plans";
+import { ZONE_META } from "@/game/constants";
+import type { FloorPlan, PropKind, ZoneKind } from "@/game/types";
+import { isSolid } from "@/game/plans";
 
 export type SceneMode = "preview" | "fps" | "tps";
 

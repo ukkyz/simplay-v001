@@ -1,8 +1,10 @@
+"use client";
+
 import React from "react";
-import { ARCHETYPE_BY_ID, EXEC_META, PHASE_CONFIG, TUNABLES } from "../game/constants";
-import { PHASES } from "../game/types";
-import type { Project } from "../game/types";
-import { cn } from "../utils/cn";
+import { ARCHETYPE_BY_ID, EXEC_META, PHASE_CONFIG, TUNABLES } from "@/game/constants";
+import { PHASES } from "@/game/types";
+import type { Project } from "@/game/types";
+import { cn } from "@/utils/cn";
 import { Btn, Chip, Icon, Meter } from "./ui";
 import { fmt } from "./Shell";
 

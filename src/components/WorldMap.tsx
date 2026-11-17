@@ -1,11 +1,13 @@
+"use client";
+
 import L from "leaflet";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { AREA_META, ARCHETYPES, ARCHETYPE_BY_ID, ROAD_GRADES } from "../game/constants";
-import { areaCenter, flows, priceFor, siteLL, tradeCapacity } from "../game/engine";
-import { formatLL, haversineKm } from "../game/geo";
-import type { AreaKind, GameState } from "../game/types";
-import { useGame } from "../state/store";
-import { cn } from "../utils/cn";
+import { AREA_META, ARCHETYPES, ARCHETYPE_BY_ID, ROAD_GRADES } from "@/game/constants";
+import { areaCenter, flows, priceFor, siteLL, tradeCapacity } from "@/game/engine";
+import { formatLL, haversineKm } from "@/game/geo";
+import type { AreaKind, GameState } from "@/game/types";
+import { useGame } from "@/state/store";
+import { cn } from "@/utils/cn";
 import { Btn, Chip, Icon, Meter } from "./ui";
 import { PhaseStrip, Stat } from "./Pipeline";
 import { fmt } from "./Shell";

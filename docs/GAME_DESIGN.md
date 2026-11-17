@@ -1,4 +1,4 @@
-# Systems reference — v1.0
+# Systems reference — v1.1
 
 2026-11-16; observed baseline `294a75c`. This is an implementation-oriented design map, not a new balance pass. Numeric sources: `constants.ts` and `engine.ts`; known contradictions: [decision register](DECISIONS.md). Existing in-app § references describe its own GDD, not section numbers in this document.
 
@@ -21,8 +21,8 @@ Target feeling is informed control, not surprise bankruptcy. Meaningful decision
 | Resource operation | Make resilience matter; choose production vs capacity | Operational buildings → power/food/materials, upkeep/revenue, crew/storage; `flows` + hourly tick | Brownout halves production efficiency; empty food/overcapacity lower morale. Trade/build/maintenance are recovery levers; storage stocks can spoil. |
 | Condition/maintenance | Keep old assets relevant; choose repair timing | Hourly condition decay 0.08; below 40 condition multiplier 0.6. `maintain` costs round((100−condition)×45), restores 100 | Insufficient credits rejected. At exactly 40 penalty is not yet active. Current multiplier affects power demand as well as output. |
 | Trade/roads | Give surplus an outlet; choose timing/partner/infrastructure | Buy/sell food/materials against bot inventory/purse; price depends on market/relation/modifiers; grade upgrades affect capacity | Per-bot cooldown 6 sim-hours; quantity capped by `tradeCapacity`; insufficient stock/cash refuses. Power/credits trades rejected. Roads/partners are simulated, not real player contracts. |
-| Executive board/stance | Explain bottlenecks and schedule tradeoffs; choose whose advice to follow | Chat/digest → advisory text; stance modifies phase speed/design quality | Disabled/no-key → local rules; endpoint errors → local fallback. No timeout. Text never directly executes actions. Local facts/prompt grounding need regression checks. |
-| Speed/persistence | Let players control waiting; choose pace | 0/1/4/16× → timer cadence, local state and debounced saves | No offline progress/server clock; browser throttling and fast-tick save starvation. JSON reset is destructive; export contains keys. |
+| Executive board/stance | Explain bottlenecks and schedule tradeoffs; choose whose advice to follow | Chat/digest → advisory text via server proxy; stance modifies phase speed/design quality | No server provider configured → local rules; timeout/error/empty → local fallback (server-composed). Text never directly executes actions. Local facts/prompt grounding still need regression checks. |
+| Speed/persistence | Let players control waiting; choose pace | 0/1/4/16× → timer cadence; server snapshot saves via a coalesced queue (≤1 write in flight, ≥1 attempt / 4 s) | No offline progress/server clock; browser throttling still slows progression. Reset deletes the server save (and advisor preferences) for this anonymous session. Exports are credential-free. Snapshot persistence ≠ multiplayer. |
 | Progression/visits | Make expansion and neighboring activity visible | XP → CEO level/tier access; generated remote plans → visits | Neighbors/presence/security affordances are local simulation, not authorization. Read-only visit UI is not a multiplayer permission system. |
 
 ## Balance levers and rationale
@@ -52,3 +52,4 @@ Balance proposals must compare a reproducible starting state and controlled time
 ## Revision log
 
 - v1.0 — 2026-11-16: current-system inventory and balance provenance; no tuning changed.
+- v1.1 — 2026-11-17: persistence/advisor rows updated for server snapshots and the server-proxied advisor. No balance value changed.

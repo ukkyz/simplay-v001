@@ -1,8 +1,10 @@
+"use client";
+
 import L from "leaflet";
 import { useEffect, useRef, useState } from "react";
-import { TUNABLES } from "../game/constants";
-import { claimCorners, formatLL } from "../game/geo";
-import { useGame } from "../state/store";
+import { TUNABLES } from "@/game/constants";
+import { claimCorners, formatLL } from "@/game/geo";
+import { useGame } from "@/state/store";
 import { Btn, Icon } from "./ui";
 
 /**
