@@ -131,6 +131,7 @@ Simulated peers remain labeled simulated.
 | [Validation](docs/TESTING.md) | Verified baseline and reproducible manual/regression checks |
 | [Advisor prompt contract](docs/prompts/ADVISOR_PROMPT.md) | Prompt v2 output contract, success criteria, three test cases |
 | [Arena change-request prompt](docs/prompts/CHANGE_REQUEST.md) | Copyable migration prompt |
+| [Ally areas prompt](docs/prompts/ALLY_AREAS.md) | Proposed v1 prompt + review contract for ally autonomy and read-only 3D parcel tours |
 | [Changelog](CHANGELOG.md) | Repository revisions |
 
 ## Contributing

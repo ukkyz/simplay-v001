@@ -9,8 +9,8 @@ Applies to the whole repository. Updated 2026-11-17. Current stack: Next.js 16 (
 2. `docs/ARCHITECTURE.md`: source map, rendering/request boundaries, persistence seams.
 3. `docs/PERSISTENCE.md`: schema/versions, save lifecycle, API contract, backup/restore.
 4. `docs/DECISIONS.md`: accepted decisions and known risks.
-5. For mechanics/balance read `docs/GAME_DESIGN.md`; for prompts read `docs/prompts/ADVISOR_PROMPT.md`
-   and `docs/prompts/CHANGE_REQUEST.md`; validate using `docs/TESTING.md`.
+5. For mechanics/balance read `docs/GAME_DESIGN.md`; for prompts read `docs/prompts/ADVISOR_PROMPT.md`,
+   `docs/prompts/CHANGE_REQUEST.md` and `docs/prompts/ALLY_AREAS.md`; validate using `docs/TESTING.md`.
 
 Inspect current source and `git status --short` before editing. These docs are a map, not a substitute for reading changed code. Existing runtime behavior wins when describing implementation; an explicit user decision defines intended behavior. Record disagreements instead of hiding them.
 
@@ -41,7 +41,7 @@ Inspect current source and `git status --short` before editing. These docs are a
 
 Every new/changed mechanic must specify purpose, player feeling/decision, inputs, outputs, rules/formulas, edge cases, failure/recovery, and acceptance tests. Every changed economic number needs units, a rationale, and a boundary example. Distinguish hypothesis from measured balance.
 
-Before authoring a prompt define its output format and success criteria. Version it with a changelog and at least three cases (happy, edge, failure). Ground factual claims in provided state; make unknowns explicit; specify word/field limits instead of vague style instructions. Request concise decision summaries, not private chain-of-thought. Record actual production model identifier, provider, temperature, fixtures, and observations for model tests. If live evaluation is unavailable, mark it **not run** rather than asserting reliability. Do not send secrets or private player data to evaluate a prompt without approval.
+Before authoring a prompt define its output format and success criteria. Implementation prompts that would change persisted game state must name the `validateGameState()`/`prepareLegacySave()` update they require, because an unvalidated new field makes every save fail with `422`. Version it with a changelog and at least three cases (happy, edge, failure). Ground factual claims in provided state; make unknowns explicit; specify word/field limits instead of vague style instructions. Request concise decision summaries, not private chain-of-thought. Record actual production model identifier, provider, temperature, fixtures, and observations for model tests. If live evaluation is unavailable, mark it **not run** rather than asserting reliability. Do not send secrets or private player data to evaluate a prompt without approval.
 
 ## Definition of done
 
