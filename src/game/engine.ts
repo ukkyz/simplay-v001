@@ -14,6 +14,7 @@ import {
 } from "./constants";
 import { claimCorners, formatLL, hashString, mulberry32, offsetLL, roadPath } from "./geo";
 import { generatePlan } from "./plans";
+import { WORLD_PERSONAS } from "./world";
 import { PHASES } from "./types";
 import type {
   AIConfig,
@@ -53,12 +54,12 @@ const BOT_NAMES = [
   ["VOSTOK FREIGHT CO.", "offtaker"],
 ] as const;
 
-const PEER_NAMES = [
-  { name: "Aurora Kasprzak", handle: "@aurora.builds", color: "#a3cb4d" },
-  { name: "Teodor Mihail", handle: "@teodor_m", color: "#6fb7ff" },
-  { name: "Nneka Adeyemi", handle: "@nneka.ops", color: "#f2a33c" },
-  { name: "Ravi Chandran", handle: "@ravi_ch", color: "#ff8347" },
-];
+/**
+ * The simulated cast is defined once, in `src/game/world.ts`, and shared with the
+ * server-side AI roster so the map cannot show two different casts. This local
+ * copy is only a fallback for `state.remote` when `/api/world` is unreachable.
+ */
+const PEER_NAMES = WORLD_PERSONAS;
 
 export const QUADRANT: Record<number, { dx: number; dy: number }> = {
   0: { dx: 2, dy: 2 },

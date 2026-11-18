@@ -2,7 +2,7 @@
 
 A world-simulation web game about running a company on a real-world map: claim territory, commission buildings through an SDLC-style pipeline, balance resources, and consult an executive board.
 
-**Product direction:** multiplayer on the same real-world geography using OpenStreetMap (OSM). **Current implementation:** a Next.js (App Router) single-server app with SQLite persistence. The simulation still runs in the browser; the server stores one anonymous player's snapshot at a time. There is no shared world, real human presence, or server-authoritative economy yet.
+**Product direction:** multiplayer on the same real-world geography using OpenStreetMap (OSM). **Current implementation:** a Next.js (App Router) single-server app with SQLite persistence. The simulation still runs in the browser; the server stores one anonymous player's snapshot at a time. Two players registered in different browsers can now **see each other's area** — opt-in, approximate (≈1 km) and presence-only — on one shared map with a shared cast of simulated neighbours. There is still no shared simulation, shared economy, trade between real players or server-authoritative tick.
 
 ## Run locally
 
@@ -71,6 +71,7 @@ Copy `.env.example`; every value below is server-side. There are **no**
 | `SIMPLAYZ_ALLOWED_HOSTS` | unset (accept any) | Optional comma-separated Host allowlist; set it in production |
 | `SIMPLAYZ_DB_MIGRATE` | `auto` | `manual` requires `npm run db:migrate` before serving |
 | `SIMPLAYZ_DEV_ORIGINS` | `*.e2b.app` | Extra dev origins allowed to talk to `next dev` only |
+| `SIMPLAYZ_WORLD_SEED` | `simplayz-world-1` | **Not a secret.** Seeds the deterministic AI neighbour roster; changing it moves every simulated neighbour for every player at once |
 | `SIMPLAYZ_AI_API_KEY` | unset | Enables the live executive advisor; unset ⇒ local advisor only |
 | `SIMPLAYZ_AI_BASE_URL` | `https://api.openai.com/v1` | Must also appear in the allowlist |
 | `SIMPLAYZ_AI_MODEL` | `gpt-4o-mini` | Must also appear in the allowlist |
@@ -112,12 +113,15 @@ writer) per database; multi-instance/HA SQLite is out of scope.
 - Balance credits, materials, food, power, storage, morale, and building condition.
 - Consult CTO/CFO/COO advisors (local rules by default; optional server-configured model).
 - Trade with simulated alliance bots and visit simulated neighboring CEOs.
+- Share your area on the shared world map (World screen → **Share area**, off by default) so players in other browsers see an approximate (≈1 km) outline of your claim next to a shared cast of simulated AI neighbours. Opting out deletes the published row.
 - Use keys 1–6 to switch screens; control time at pause/1×/4×/16×.
 
-**Not implemented:** accounts/OAuth/recovery, shared worlds, cross-player claim conflicts,
-authoritative server simulation or offline progression, real human presence, OSM-way
+**Not implemented:** accounts/OAuth/recovery, a shared *simulation* (shared tick, economy,
+trade between real players, ownership transfer), cross-player claim conflicts,
+authoritative server simulation or offline progression, realtime presence (the shared map
+polls every 10 s; it is not a socket), visiting another real player's interior, OSM-way
 routing, multi-instance deployment. `netMode: "live"` is a type option, not a transport.
-Simulated peers remain labeled simulated.
+Simulated peers remain labeled simulated and are never counted as players.
 
 ## Documentation
 
@@ -132,6 +136,7 @@ Simulated peers remain labeled simulated.
 | [Advisor prompt contract](docs/prompts/ADVISOR_PROMPT.md) | Prompt v2 output contract, success criteria, three test cases |
 | [Arena change-request prompt](docs/prompts/CHANGE_REQUEST.md) | Copyable migration prompt |
 | [Ally areas prompt](docs/prompts/ALLY_AREAS.md) | Proposed v1 prompt + review contract for ally autonomy and read-only 3D parcel tours |
+| [Shared world prompt](docs/prompts/SHARED_WORLD.md) | Proposed v1 prompt + review contract for one shared map: published player areas and a deterministic AI roster |
 | [Changelog](CHANGELOG.md) | Repository revisions |
 
 ## Contributing

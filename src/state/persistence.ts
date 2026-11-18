@@ -8,6 +8,7 @@
 import { LEGACY_SAVE_KEY, stripSecrets } from "@/server/gameSave";
 import type { SaveResponse, SaveSnapshot } from "./saveQueue";
 import type { GameState } from "@/game/types";
+import type { WorldMeResponse, WorldResponse } from "@/game/world";
 
 export interface LoadedSave {
   state: GameState;
@@ -148,5 +149,82 @@ export function clearLegacySave(): void {
     window.localStorage.removeItem(LEGACY_SAVE_KEY);
   } catch {
     /* private mode — leave it, it will simply be re-offered next load */
+  }
+}
+
+/* ----------------------------- shared world ------------------------------ */
+
+/**
+ * Shared-world transport. Relative URLs only, `no-store` everywhere: a cached
+ * roster would show one player a stale world and another a fresh one.
+ *
+ * This is presence, not authority: nothing here can mutate the caller's save.
+ */
+export interface WorldFetchResult {
+  ok: boolean;
+  json?: WorldResponse;
+  status: number;
+}
+
+export async function fetchWorld(
+  bbox: { latMin: number; latMax: number; lngMin: number; lngMax: number },
+  limit: number,
+  signal: AbortSignal,
+): Promise<WorldFetchResult> {
+  const qs = new URLSearchParams({
+    latMin: bbox.latMin.toFixed(4),
+    latMax: bbox.latMax.toFixed(4),
+    lngMin: bbox.lngMin.toFixed(4),
+    lngMax: bbox.lngMax.toFixed(4),
+    limit: String(limit),
+  });
+  try {
+    const res = await sessionFetch(`/api/world?${qs.toString()}`, { signal });
+    if (!res.ok) return { ok: false, status: res.status };
+    return { ok: true, status: res.status, json: (await res.json()) as WorldResponse };
+  } catch {
+    return { ok: false, status: 0 };
+  }
+}
+
+export async function fetchWorldMe(): Promise<WorldMeResponse | null> {
+  try {
+    const res = await sessionFetch("/api/world/me", { method: "GET" });
+    if (!res.ok) return null;
+    return (await res.json()) as WorldMeResponse;
+  } catch {
+    return null;
+  }
+}
+
+export interface PublishResult {
+  ok: boolean;
+  published: boolean;
+  message?: string;
+}
+
+/**
+ * Toggle publication of the caller's area. The body carries only the boolean:
+ * position and company are derived server-side from the caller's own save.
+ */
+export async function setPublished(publish: boolean): Promise<PublishResult> {
+  try {
+    const res = await sessionFetch("/api/world/publish", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ publish }),
+    });
+    const json = (await res.json().catch(() => null)) as
+      | { published?: boolean; error?: { message?: string } }
+      | null;
+    if (!res.ok)
+      return {
+        ok: false,
+        published: !publish,
+        message: json?.error?.message ?? `Publish failed (${res.status}).`,
+      };
+    return { ok: true, published: json?.published ?? publish };
+  } catch {
+    return { ok: false, published: !publish, message: "Network unavailable." };
   }
 }

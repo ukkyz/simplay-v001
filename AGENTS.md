@@ -10,7 +10,8 @@ Applies to the whole repository. Updated 2026-11-17. Current stack: Next.js 16 (
 3. `docs/PERSISTENCE.md`: schema/versions, save lifecycle, API contract, backup/restore.
 4. `docs/DECISIONS.md`: accepted decisions and known risks.
 5. For mechanics/balance read `docs/GAME_DESIGN.md`; for prompts read `docs/prompts/ADVISOR_PROMPT.md`,
-   `docs/prompts/CHANGE_REQUEST.md` and `docs/prompts/ALLY_AREAS.md`; validate using `docs/TESTING.md`.
+   `docs/prompts/CHANGE_REQUEST.md`, `docs/prompts/ALLY_AREAS.md` and
+   `docs/prompts/SHARED_WORLD.md`; validate using `docs/TESTING.md`.
 
 Inspect current source and `git status --short` before editing. These docs are a map, not a substitute for reading changed code. Existing runtime behavior wins when describing implementation; an explicit user decision defines intended behavior. Record disagreements instead of hiding them.
 
@@ -26,6 +27,7 @@ Inspect current source and `git status --short` before editing. These docs are a
 - Keep the client/server boundary honest: DB/session/AI-config modules are `server-only`; Leaflet, Three.js, `window`/`document`, pointer lock and WebGL stay inside `"use client"` trees and `useEffect`. Browser application calls use relative URLs only.
 - Persistence changes must keep: cookie-only ownership, optimistic concurrency (reject stale writes, never overwrite), validation before write, JSON content type + same-origin checks, and credential stripping.
 - Do not describe the reducer as deterministic: it currently uses `Math.random` and `Date.now`. Mock/control those sources for reproducible tests.
+- The shared world is **presence only** (`src/game/world.ts`, `src/server/db/world.ts`). Published areas are derived server-side from the caller's own save, coarsened to 1/100°, opt-in and off by default; `player_id` never leaves the server. Never describe it as a shared simulation, shared economy, realtime or authority, and never publish precise coordinates or another player's identity. Opponent-supplied text must go through `textContent`, never into Leaflet HTML strings.
 - Dev/preview servers bind to `0.0.0.0`; browser code must not call sandbox `localhost` for a separate API. Allow preview origins narrowly (`allowedDevOrigins` / `SIMPLAYZ_DEV_ORIGINS`), never by disabling origin checks.
 
 ## Change workflow

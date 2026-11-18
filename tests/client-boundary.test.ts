@@ -145,6 +145,80 @@ describe("browser API usage", () => {
     assert.match(shell, /MIGRATE BROWSER-SAVED PROGRESS/);
   });
 
+  it("never interpolates opponent-supplied text into map HTML", () => {
+    const map = read("src/components/WorldMap.tsx");
+    // Shared-world icons and tooltips are built as DOM nodes and filled with
+    // textContent: the text comes from another player's save, so a template
+    // string here would be stored XSS. Own-save icons (SITE_HTML/LABEL_HTML/
+    // BOT_HTML/PEER_HTML) are excluded by name.
+    const sharedSection = map.slice(
+      map.indexOf("Shared-world icons"),
+      map.indexOf("export default function WorldMap"),
+    );
+    assert.ok(sharedSection.length > 500, "the shared-world icon helpers must exist");
+    assert.match(sharedSection, /document\.createElement/);
+    assert.match(sharedSection, /textContent = /);
+    assert.equal(
+      /innerHTML|<\$\{/.test(sharedSection),
+      false,
+      "shared-world DOM must not build HTML strings",
+    );
+    // Colours are re-validated before they reach a style attribute.
+    assert.match(map, /const SAFE_COLOR = \/\^#\[0-9a-fA-F\]\{6\}\$\//);
+    assert.match(map, /function safeColor\(/);
+    // And the roster is always escaped through those helpers.
+    assert.match(map, /html: neighbourNode\(e\)/);
+    assert.match(map, /bindTooltip\(neighbourTooltip\(e\)/);
+  });
+
+  it("draws exactly one neighbour cast and never mixes players with simulation", () => {
+    const map = read("src/components/WorldMap.tsx");
+    // Registry, else fallback — never both.
+    assert.match(map, /if \(roster\.source === "server"\) \{/);
+    assert.match(map, /\} else \{\n\s+state\.remote\.forEach/);
+    // Counts are reported separately, so no UI can claim "N players online".
+    const world = read("src/game/world.ts");
+    assert.match(world, /counts: \{ player: number; ai: number \}/);
+    assert.match(world, /player: "Player · approximate/);
+    assert.match(world, /ai: "AI neighbour · simulated"/);
+    // Polling is bounded, pauses when hidden, and cannot start before the map
+    // exists (a missing dep here would leave the neighbours permanently empty).
+    assert.match(map, /WORLD_POLL_MS/);
+    assert.match(map, /document\.visibilityState === "visible"/);
+    assert.match(map, /if \(!map \|\| !mapReady \|\| !show\.peers\) return;/);
+    assert.match(map, /\}, \[show\.peers, mapReady\]\);/);
+    assert.match(map, /inFlight\?\.abort\(\)/);
+  });
+
+  it("keeps the shared world out of the game save", () => {
+    // The registry lives in its own table and is derived server-side; the save
+    // shape and its validators must not learn about it.
+    const types = read("src/game/types.ts");
+    const gameStateBody = types.slice(
+      types.indexOf("export interface GameState {"),
+      types.indexOf("}", types.indexOf("export interface GameState {")) + 1,
+    );
+    // `"world"` is a screen id elsewhere in this file; only GameState matters.
+    assert.equal(
+      /world|publish/i.test(gameStateBody),
+      false,
+      `GameState must not gain shared-world fields: ${gameStateBody}`,
+    );
+    const engine = read("src/game/engine.ts");
+    assert.match(engine, /const PEER_NAMES = WORLD_PERSONAS/, "one cast, shared with the server");
+    const world = read("src/server/db/world.ts");
+    assert.match(world, /public function|export function publishArea/);
+    assert.match(world, /re-reads the caller's own validated save/);
+    // Every publish path re-derives from the save, never from a request body.
+    const publishRoute = read("src/app/api/world/publish/route.ts");
+    assert.match(publishRoute, /payload\.publish !== "boolean"/);
+    assert.equal(
+      /payload\.(lat|lng|company|playerId)/.test(publishRoute),
+      false,
+      "the publish route must ignore client-supplied position or identity",
+    );
+  });
+
   it("keeps OSM attribution in both map surfaces", () => {
     for (const rel of ["src/components/WorldMap.tsx", "src/components/Onboarding.tsx"]) {
       const src = read(rel);

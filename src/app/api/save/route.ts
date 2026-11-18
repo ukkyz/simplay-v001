@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { deleteSave, readSave, writeSave } from "@/server/db/saves";
+import { refreshPublishedArea, unpublishArea } from "@/server/db/world";
 import { handle, requirePlayer } from "@/server/http/handler";
 import {
   RequestRejected,
@@ -66,6 +67,10 @@ export async function PUT(req: NextRequest) {
     switch (outcome.kind) {
       case "created":
       case "updated": {
+        // Shared-world follow-up, after the save has committed (writeSave returns
+        // only once the transaction is done). No-op unless the caller published
+        // their area, and a registry failure must never fail a successful save.
+        refreshPublishedArea(playerId);
         const res = NextResponse.json(
           {
             save: {
@@ -122,6 +127,9 @@ export async function DELETE(req: NextRequest) {
     const playerId = requirePlayer(req);
     assertSameOrigin(req);
     const result = deleteSave(playerId);
+    // A reset also withdraws the published area: a registry row pointing at a
+    // save that no longer exists would be a stale, unpublishable ghost.
+    unpublishArea(playerId);
     return NextResponse.json(
       { deleted: result.deleted },
       { status: 200, headers: { "Cache-Control": "no-store" } },

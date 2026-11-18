@@ -18,11 +18,13 @@ import {
   LEGACY_KEY,
   clearLegacySave,
   ensureSession,
+  fetchWorldMe,
   loadSave,
   putSave,
   putSaveKeepalive,
   readLegacySave,
   resetSave,
+  setPublished,
 } from "./persistence";
 import { SaveQueue, type SaveQueueStatus } from "./saveQueue";
 
@@ -59,6 +61,19 @@ export interface UiState {
   chatRole: "cto" | "cfo" | "coo" | "all";
 }
 
+/**
+ * Shared-world publication state for *this* player.
+ *
+ * `published` defaults to false and is never inferred: the server is the source
+ * of truth, and a player who never opted in must stay invisible.
+ */
+export interface WorldView {
+  published: boolean;
+  busy: boolean;
+  /** Coarsened position the server stored, only while published. */
+  area: { lat: number; lng: number; sideKm: number } | null;
+}
+
 export interface PersistenceView {
   phase: SavePhase;
   status: SaveQueueStatus;
@@ -80,6 +95,9 @@ interface Ctx {
   loadDemo: () => void;
   hardReset: () => Promise<void>;
   persistence: PersistenceView;
+  /** Shared-world publication for this player (presence only, opt-in). */
+  world: WorldView;
+  togglePublished: () => Promise<void>;
   retrySave: () => void;
   reloadFromServer: () => Promise<void>;
   /** Conflict recovery: adopt the server's newer snapshot, discarding local pending. */
@@ -122,6 +140,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<{ serverRevision: number; message: string } | null>(null);
   const [legacy, setLegacy] = useState<PersistenceView["legacy"]>(null);
+  const [world, setWorld] = useState<WorldView>({ published: false, busy: false, area: null });
+  const worldRef = useRef(world);
+  worldRef.current = world;
 
   const queueRef = useRef<SaveQueue<GameState> | null>(null);
   const stateRef = useRef(state);
@@ -479,6 +500,46 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
   const exportState = useCallback(() => stripSecrets(stateRef.current), []);
 
+  /* ---------------------------- shared world ----------------------------- */
+
+  /** Ask the server whether this player's area is published (source of truth). */
+  const refreshWorldMe = useCallback(async () => {
+    const me = await fetchWorldMe();
+    if (!me) return;
+    setWorld((w) => ({
+      ...w,
+      published: me.published,
+      area:
+        me.published && typeof me.lat === "number" && typeof me.lng === "number"
+          ? { lat: me.lat, lng: me.lng, sideKm: me.sideKm ?? 0 }
+          : null,
+    }));
+  }, []);
+
+  useEffect(() => {
+    if (phase !== "ready" || !ui.booted) return;
+    void refreshWorldMe();
+  }, [phase, ui.booted, refreshWorldMe]);
+
+  const togglePublished = useCallback(async () => {
+    setWorld((w) => ({ ...w, busy: true }));
+    const next = !worldRef.current.published;
+    const result = await setPublished(next);
+    if (!result.ok) {
+      toast(result.message ?? "Could not change sharing.", "bad");
+      setWorld((w) => ({ ...w, busy: false }));
+      return;
+    }
+    toast(
+      result.published
+        ? "Your area is published (approximate, ≈1 km). Other players will see it."
+        : "Your area is no longer shared. The published row was deleted.",
+      result.published ? "good" : "bad",
+    );
+    await refreshWorldMe();
+    setWorld((w) => ({ ...w, busy: false }));
+  }, [refreshWorldMe, toast]);
+
   const value = useMemo<Ctx>(
     () => ({
       state,
@@ -499,6 +560,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         conflict,
         legacy,
       },
+      world,
+      togglePublished,
       retrySave,
       reloadFromServer,
       acceptServerVersion,
@@ -525,6 +588,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       loadError,
       conflict,
       legacy,
+      world,
+      togglePublished,
       retrySave,
       reloadFromServer,
       acceptServerVersion,

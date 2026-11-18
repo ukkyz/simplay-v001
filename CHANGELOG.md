@@ -2,6 +2,54 @@
 
 Repository history. Existing in-game feature history remains in `src/game/constants.ts`; its dates/versions have not been independently verified. Package version `0.0.0`, game-save schema `4`, in-game feature version and document versions are separate identifiers.
 
+## 2026-11-17 — Shared world map: players can see each other (presence only)
+
+Implements `docs/prompts/SHARED_WORLD.md` v1.
+
+- **Fixed the reported bug.** Two players registered in different browsers could not see
+  each other's area because no cross-player data path existed: `/api/save` is scoped to the
+  caller's row, `GameState` holds one claim, and the "other CEOs" on the map were fabricated
+  per save by `makePeers` from the player's own coordinates. Added a `world_players` registry
+  (migration `0001_neat_dormammu.sql`) plus `GET /api/world`, `GET /api/world/me` and
+  `POST /api/world/publish`.
+- **Server-derived, never client-supplied.** Publishing re-reads the caller's own validated
+  save; the request body may only carry `{publish: boolean}`. Coordinates are stored as
+  integers at 1/100° (≈1.1 km) and `player_id` is never returned (opaque `ref` instead).
+  Opt-in is off by default; opt-out and save-reset hard-delete the row.
+- **One shared AI cast.** `src/game/world.ts` derives simulated neighbours from
+  `SIMPLAYZ_WORLD_SEED` and a coarse cell grid, replacing the per-save `PEER_NAMES` copy, so
+  every client sees identical AI areas that do not reshuffle while panning. Wide viewports
+  are sampled (`MAX_ROSTER_CELLS`), not emptied.
+- **Map.** One cast is drawn (registry, else the save's peers with an "offline neighbours"
+  note), players as hexagons and AI as dashed circles, built with `document.createElement`
+  and `textContent` because the text now comes from another player's save — the existing
+  `bindTooltip`/`PEER_HTML` string interpolation would have been stored XSS. Polling is
+  ≤1 request per 10 s, paused while the tab is hidden, aborted on unmount, and the overlay
+  rebuilds only when a roster hash changes.
+- **Unchanged contracts.** Game-save schema stays `4`, `validateGameState()` and
+  `prepareLegacySave()` are untouched, save body growth is 0 bytes, `MAX_SAVE_BYTES` and the
+  advisor prompt are unchanged. No new dependencies.
+- **Validation.** typecheck PASS; `npm test` 75/75 (18 new world checks + 3 static boundary
+  checks); `npm run build` PASS; `npx tsx scripts/smoke-http.ts` 20/20 on `next dev` and
+  20/20 on `next start` (new checks: unpublished by default, mutual visibility between two
+  cookie jars, self never shown as a neighbour, opt-out visible to a third session, 401).
+  Browser rendering of the new layer (Leaflet tiles, marker DOM, WebGL interiors) is
+  **NOT RUN** — no browser runtime available in this environment.
+
+## 2026-11-17 — Shared world map prompt v1 (documentation only)
+
+- Added `docs/prompts/SHARED_WORLD.md`: a copyable implementation prompt plus review
+  contract for the reported "two browsers, two players, neither sees the other's area"
+  problem.
+- Verified the root cause before writing: no cross-player data path exists (`/api/save` is
+  scoped to the caller's row; `src/server/db/schema.ts:12` has no world table), a save holds
+  exactly one claim, and the visible "other CEOs" are fabricated per save by `makePeers`
+  (`src/game/engine.ts:166`) from the player's own coordinates and company name.
+- Scoped to a server-derived registry of coarsened published areas plus a deterministic
+  shared AI roster. Deliberately keeps `GameState`/`schema 4` and the save validators
+  untouched, refuses shared economy/realtime/interior visiting, and makes publishing
+  opt-in and off by default. Prompt status is **proposed / NOT RUN**.
+
 ## 2026-11-17 — Ally areas prompt v1 (documentation only)
 
 - Added `docs/prompts/ALLY_AREAS.md`: a compact implementation prompt for ally-owned areas

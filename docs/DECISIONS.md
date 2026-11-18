@@ -1,8 +1,9 @@
-# Decisions, risks and open questions — v2.1
+# Decisions, risks and open questions — v2.3
 
 v1.0 audit: 2026-11-16, baseline `294a75c`. v2.0: 2026-11-17, `arena/8af8e052-simplay`
 (Next.js + SQLite persistence migration). v2.1: 2026-11-17, `arena/4f86a17c-simplay` (ally
-areas prompt recorded as provisional; duplicated v1 tail removed from this file). Priority is
+areas prompt recorded as provisional; duplicated v1 tail removed from this file). v2.2:
+2026-11-17, `arena/5b8ea4e6-simplay` (shared-world prompt recorded as provisional). Priority is
 a recommendation, not an approved implementation backlog.
 
 ## Confirmed direction vs provisional defaults
@@ -31,7 +32,8 @@ reconfigure game rules.
 | D7 | Coalesced save queue: one in-flight write, ≥1 attempt / 4 s during continuous play, immediate flush on pause/significant action | Replaces the debounce that accelerated play could starve (old R3). 4 s is inside the 5 s progress-loss budget and ~1/64 of a 16× tick rate. |
 | D8 | Client-driven simulation retained; server persists snapshots only | Requested; server authority/offline progression explicitly out of scope. |
 | D9 | Operator-owned AI credentials, allowlisted endpoint/model, 12 s timeout, per-session rate limit; player-key UI removed | Fixes old R1 partly. Arbitrary client URL proxying rejected as an SSRF/open-proxy risk. |
-| D10 | Reset deletes only the caller's save row + its advisor preferences; session row survives | Documented and implemented in `DELETE /api/save`. |
+| D10 | Reset deletes only the caller's save row + its advisor preferences; session row survives | Documented and implemented in `DELETE /api/save`. Now also deletes the caller's `world_players` row: a publication never outlives its save. |
+| D11 | **Shared map = presence only.** A separate `world_players` table holds an opt-in, server-derived, 1/100°-coarsened outline per player; the AI neighbour roster is deterministic per `SIMPLAYZ_WORLD_SEED`. No shared simulation, economy, trade, ownership or authority. | Implemented 2026-11-17 from `docs/prompts/SHARED_WORLD.md`. Chosen over widening `GameState`: save shape `4` and both validators are untouched, opt-out is a hard delete, and precise coordinates never reach the database. `player_id` is never returned (responses use an opaque `ref`). |
 
 ## Reworked risk register
 
@@ -40,7 +42,7 @@ reconfigure game rules.
 | R1 | **Partially fixed (v2)** | API keys are gone from `GameState`, persistence, exports, responses, bundles and logs (tests assert it). Remaining exposure: save contents (identity, claim location, economy) are still readable by whoever holds the cookie or the DB file; the advisor still sends a city digest externally when configured. Retention/consent policy still undefined. |
 | R2 | **Partially fixed (v2)** | Saves and imports are structurally validated (bounds, plan `w*h`, entity references) before persistence; invalid payloads cannot replace the last valid save. The simulation values themselves are not re-derived server-side, so a hand-crafted *valid-shaped* save (e.g. absurd credits within bounds) is still accepted — that is client-driven simulation, not a validation bug. |
 | R3 | **Fixed (v2)** | Autosave no longer starves under 4×/16× play; cadence and single-in-flight behaviour are unit-tested. Unload writes remain best effort. |
-| R4 | Open | Still no shared authority or multiplayer. Snapshot persistence is not a network contract. |
+| R4 | Open (partly mitigated by D11) | Two players can now *see* each other's approximate area, but there is still no shared authority, shared tick, shared economy or conflict rule. Snapshot persistence is not a network contract; a published position reflects what a client saved, not a verified location. |
 | R5 | Open | Engine still uses `Math.random`/`Date.now`; tests that need determinism inject clocks/ids. Not addressed by this migration. |
 | R6 | Partially fixed (v2) | Advisor now has a bounded timeout; the duplicated latest-turn bug is gone (history + current question are separate). `flows.revenue`/`netCredits` civic-dividend mismatch and static balance claims in local advice remain. |
 | R7 | Open | Claim geometry still overlaps; roads still synthetic. |
@@ -72,9 +74,16 @@ reconfigure game rules.
   `ui.visit` → `BuildingScene` read-only path. Ally autonomy must not spend the player's
   treasury, and simulated allies stay labelled simulated. Any effect on trade or economy
   needs its own approved decision.
+- **Shared world map** (`docs/prompts/SHARED_WORLD.md`, prompt v1): a published-area
+  registry plus a deterministic shared AI roster, so two players can see each other's
+  area. Not a decision. D8 (client-driven simulation, server stores snapshots) and q4
+  (overlap) and q5 (who may write) stay open; the prompt is presence only — no shared
+  economy, no realtime transport, no shared authority. Publishing is opt-in, off by
+  default, and stores coarsened coordinates only.
 
 ## Revision log
 
 - v1.0 — 2026-11-16: repository audit; separated multiplayer/OSM vision from browser-local simulation.
 - v2.0 — 2026-11-17: accepted Next.js + SQLite decisions (D1–D10), updated R1/R2/R3/R6/R10 status, added R12/R13.
 - v2.1 — 2026-11-17: recorded the ally-areas prompt (`docs/prompts/ALLY_AREAS.md`) as provisional direction — no product decision approved, no risk status changed. Also removed a duplicated v1 body that had survived the v2 rewrite (the file contained two `## Revision log` sections and a stale risk table); the "Confirmed direction vs provisional defaults" section was restored verbatim in intent and updated for server-side persistence.
+- v2.2 — 2026-11-17: recorded the shared-world prompt as provisional direction. No decision approved, no risk status changed; R4 stays Open because presence is not authority.

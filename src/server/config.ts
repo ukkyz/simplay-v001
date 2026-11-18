@@ -1,5 +1,6 @@
 import "server-only";
 import path from "node:path";
+import { DEFAULT_WORLD_SEED } from "@/game/world";
 
 /**
  * Server configuration. Never import this from a client component: values here
@@ -38,6 +39,23 @@ export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 
 /** Hard cap for a single save payload body, in bytes. */
 export const MAX_SAVE_BYTES = 1_500_000;
+
+/**
+ * Hard cap for a `GET /api/world` response body, in bytes. The registry caps
+ * (200 entries, coarsened integers) keep real responses far below this; it is a
+ * guard against a future limit change, not a routine truncation.
+ */
+export const MAX_WORLD_BYTES = 65_536;
+
+/**
+ * World seed for the deterministic AI roster. NOT secret. Changing it moves
+ * every simulated neighbour for every player at once, so treat it as a
+ * world-creation constant rather than a deployment knob.
+ */
+export function getWorldSeed(): string {
+  const raw = process.env.SIMPLAYZ_WORLD_SEED?.trim();
+  return raw && raw.length > 0 ? raw.slice(0, 64) : DEFAULT_WORLD_SEED;
+}
 
 /** Hard cap for an advisor request body, in bytes. */
 export const MAX_ADVISOR_BYTES = 32_000;
