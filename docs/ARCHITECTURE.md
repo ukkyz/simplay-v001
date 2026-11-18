@@ -42,6 +42,9 @@ Drizzle ORM 0.45.4 / drizzle-kit 0.31.11, Zod not required (hand-written validat
 | SQLite connection, migrations, saves | `src/server/db/{client,migrate,saves,schema}.ts` |
 | Session cookie, CSRF, body caps, rate limits | `src/server/session.ts`, `src/server/config.ts` |
 | Advisory prompt assembly / env allowlists | `src/server/ai/{prompt,config}.ts` |
+| Shared-world roster, coarsening, publish copy | `src/game/world.ts` |
+| Published-area registry (server-derived) | `src/server/db/world.ts`, `src/server/db/schema.ts` (`world_players`) |
+| World routes | `src/app/api/world/{route,me/route,publish/route}.ts` |
 | Screens, keyboard shortcuts, save badge | `src/components/GameShell.tsx`, `src/components/Shell.tsx` |
 | Map / interiors / plan editor | `src/components/{WorldMap,Onboarding,BuildingScene,FloorPlanEditor,Studio}.tsx` |
 | Board chat | `src/components/Boardroom.tsx` |
@@ -112,9 +115,22 @@ and a bounded `AbortSignal.timeout` → clip text to 2000 chars. Every failure p
 returns `200` with server-composed local advice plus an error code. Provider text is
 advisory only; it can never mutate game state.
 
+## Shared world (presence only, implemented)
+
+`src/app/api/world` returns published player areas plus a deterministic AI roster for a
+bbox. Two players in different browsers therefore see each other, but **only presence
+crosses the wire**: the registry stores an opt-in, 1/100°-coarsened outline derived
+server-side from the caller's own save (never from a request body), and no simulation
+state, economy or action is shared. Publishing is refreshed after an accepted save write
+and deleted on opt-out or reset. `GameState` is untouched, so `schema 4` and both save
+validators did not change; the AI roster depends only on `SIMPLAYZ_WORLD_SEED` and a coarse
+cell grid, so every client sees the same simulated cast and panning never reshuffles it.
+The prompt and review contract for this change is `docs/prompts/SHARED_WORLD.md`.
+
 ## Multiplayer direction (not implemented)
 
-Persistence is a foundation, not a shared world. A multiplayer request still needs
+Persistence plus the published-area registry is still not a shared world: what exists is an
+opt-in map of approximate outlines, not a shared simulation. A multiplayer request still needs
 decisions on authority, identity/recovery, time progression, claim conflicts,
 transaction atomicity and abuse limits. `RemoteCeo`, `netMode` and generated peer
 plans remain prototype seams, not a network contract or authorization boundary.

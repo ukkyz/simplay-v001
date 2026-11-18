@@ -4,8 +4,14 @@ import L from "leaflet";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AREA_META, ARCHETYPES, ARCHETYPE_BY_ID, ROAD_GRADES } from "@/game/constants";
 import { areaCenter, flows, priceFor, siteLL, tradeCapacity } from "@/game/engine";
-import { formatLL, haversineKm } from "@/game/geo";
+import { claimCorners, formatLL, haversineKm } from "@/game/geo";
+import {
+  WORLD_LABELS,
+  WORLD_POLL_MS,
+  type WorldEntry,
+} from "@/game/world";
 import type { AreaKind, GameState } from "@/game/types";
+import { fetchWorld } from "@/state/persistence";
 import { useGame } from "@/state/store";
 import { cn } from "@/utils/cn";
 import { Btn, Chip, Icon, Meter } from "./ui";
@@ -45,6 +51,69 @@ const LABEL_HTML = (color: string, text: string, sub: string) => `
   <div style="font:400 8.5px 'IBM Plex Mono',monospace;letter-spacing:.1em;color:#9bb2b8aa">${sub}</div>
 </div>`;
 
+/* ------------------------------------------------------------------------- */
+/* Shared-world icons                                                        */
+/*                                                                           */
+/* These are built as DOM nodes and filled with `textContent`, never as HTML  */
+/* strings: the text comes from another player's save, so string             */
+/* interpolation here would be stored XSS. Every colour is a server-assigned  */
+/* palette value that is re-checked before use.                              */
+/* ------------------------------------------------------------------------- */
+
+const SAFE_COLOR = /^#[0-9a-fA-F]{6}$/;
+
+function safeColor(value: string, fallback = "#6fb7ff"): string {
+  return SAFE_COLOR.test(value) ? value : fallback;
+}
+
+/**
+ * Neighbour marker: hexagon for another player, circle for a simulated one.
+ * The shape difference is deliberate — "simulated" must be readable at a
+ * glance, not only in a tooltip.
+ */
+function neighbourNode(entry: WorldEntry): HTMLElement {
+  const color = safeColor(entry.color);
+  const root = document.createElement("div");
+  root.style.cssText =
+    "position:relative;width:26px;height:26px;margin:-13px 0 0 -13px;cursor:pointer";
+
+  const glyph = document.createElement("div");
+  const isPlayer = entry.kind === "player";
+  glyph.style.cssText = [
+    "position:absolute;inset:0",
+    `border:1.6px solid ${color}`,
+    isPlayer
+      ? `background:${entry.online ? color : "rgba(7,13,16,.9)"};clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)`
+      : `background:rgba(7,13,16,.92);border-radius:50%;border-style:dashed`,
+    "display:flex;align-items:center;justify-content:center",
+    "font:800 10px 'IBM Plex Mono',monospace",
+    `color:${entry.online ? "#0a1114" : color}`,
+  ].join(";");
+  glyph.textContent = (entry.display[0] ?? "?").toUpperCase();
+  root.appendChild(glyph);
+
+  const badge = document.createElement("div");
+  badge.style.cssText = `position:absolute;top:28px;left:50%;transform:translateX(-50%);white-space:nowrap;font:600 9px 'IBM Plex Mono',monospace;letter-spacing:.06em;color:${color};background:rgba(7,13,16,.85);padding:1px 4px;border:1px solid ${color}55`;
+  badge.textContent = entry.display.slice(0, 24);
+  root.appendChild(badge);
+
+  return root;
+}
+
+/** Tooltip body for a neighbour area. Built with DOM nodes, not a template string. */
+function neighbourTooltip(entry: WorldEntry): HTMLElement {
+  const wrap = document.createElement("div");
+  const title = document.createElement("b");
+  title.textContent = entry.display.slice(0, 64);
+  wrap.appendChild(title);
+  const line = document.createElement("div");
+  line.textContent = `${
+    entry.kind === "player" ? WORLD_LABELS.player : WORLD_LABELS.ai
+  } · ${entry.sideKm}×${entry.sideKm} km · ${entry.buildings} buildings`;
+  wrap.appendChild(line);
+  return wrap;
+}
+
 export default function WorldMap() {
   const { state } = useGame();
   const hostRef = useRef<HTMLDivElement>(null);
@@ -52,6 +121,24 @@ export default function WorldMap() {
   const layerRef = useRef<L.LayerGroup | null>(null);
   const [sel, setSel] = useState<Sel>(null);
   const [show, setShow] = useState({ peers: true, roads: true, labels: true });
+  /**
+   * Readiness signal for the polling effect. Without it the effect could run
+   * before the Leaflet map exists (or before StrictMode's remount finished) and
+   * then never start again, leaving the neighbours permanently empty.
+   */
+  const [mapReady, setMapReady] = useState(false);
+  /**
+   * Shared world roster. `source` records where the neighbours came from, so the
+   * map can say "offline neighbours" instead of silently pretending: with
+   * `fallback` the drawing comes from the save's generated `state.remote`, which
+   * is per-player fabricated data, not a shared world.
+   */
+  const [roster, setRoster] = useState<{
+    entries: WorldEntry[];
+    source: "server" | "fallback";
+    truncated: boolean;
+    counts: { player: number; ai: number };
+  }>({ entries: [], source: "fallback", truncated: false, counts: { player: 0, ai: 0 } });
 
   const claim = state.claim!;
 
@@ -69,10 +156,14 @@ export default function WorldMap() {
         state.projects.map((p) => [p.id, p.phase, Math.round(p.progress * 10), p.blockedReason ? 1 : 0]),
         state.roads.map((r) => [r.id, r.grade]),
         state.alliance.map((b) => [b.id, Math.round(b.relation)]),
-        state.remote.map((p) => [p.id, p.online]),
+        // Shared roster: only identity + presence, so a poll that returns the
+        // same world does not tear the layer group down.
+        roster.source,
+        roster.entries.map((e) => [e.ref, e.online, e.buildings]),
+        roster.truncated,
       ]),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state, claim],
+    [state, claim, roster],
   );
 
   useEffect(() => {
@@ -91,14 +182,84 @@ export default function WorldMap() {
     L.control.zoom({ position: "bottomleft" }).addTo(map);
     layerRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
+    setMapReady(true);
     window.setTimeout(() => map.invalidateSize(), 120);
     return () => {
+      setMapReady(false);
       map.remove();
       mapRef.current = null;
       layerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ---- shared world polling ---------------------------------------------
+  // One request per WORLD_POLL_MS, paused while the tab is hidden, aborted on
+  // unmount, and only when the peers layer is visible. The bbox is the map's
+  // current viewport, so panning far enough triggers an early refresh.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !show.peers) return;
+
+    let disposed = false;
+    let timer: number | null = null;
+    let inFlight: AbortController | null = null;
+
+    const load = async () => {
+      if (disposed) return;
+      const b = map.getBounds();
+      const controller = new AbortController();
+      inFlight?.abort();
+      inFlight = controller;
+      const result = await fetchWorld(
+        {
+          latMin: b.getSouth(),
+          latMax: b.getNorth(),
+          lngMin: b.getWest(),
+          lngMax: b.getEast(),
+        },
+        200,
+        controller.signal,
+      );
+      if (disposed) return;
+      setRoster((prev) => {
+        if (!result.ok || !result.json)
+          return prev.source === "fallback" && prev.entries.length === 0
+            ? prev
+            : { ...prev, source: "fallback" };
+        return {
+          entries: result.json.entries,
+          source: "server",
+          truncated: result.json.truncated,
+          counts: result.json.counts,
+        };
+      });
+    };
+
+    const schedule = () => {
+      if (timer !== null) window.clearInterval(timer);
+      timer = window.setInterval(() => {
+        if (document.visibilityState === "visible") void load();
+      }, WORLD_POLL_MS);
+    };
+
+    void load();
+    schedule();
+    const onMoveEnd = () => void load();
+    map.on("moveend", onMoveEnd);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      disposed = true;
+      if (timer !== null) window.clearInterval(timer);
+      inFlight?.abort();
+      map.off("moveend", onMoveEnd);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [show.peers, mapReady]);
 
   // ---- overlay render ---------------------------------------------------
   useEffect(() => {
@@ -193,33 +354,82 @@ export default function WorldMap() {
         .on("click", () => setSel({ t: "bot", id: b.id }));
     });
 
-    // remote CEOs
-    if (show.peers)
-      state.remote.forEach((p) => {
-        const side = 6.4;
-        const dLat = side / 2 / 110.574;
-        const dLng = side / 2 / (111.32 * Math.cos((p.lat * Math.PI) / 180));
-        L.polygon(
-          [
-            [p.lat - dLat, p.lng - dLng],
-            [p.lat - dLat, p.lng + dLng],
-            [p.lat + dLat, p.lng + dLng],
-            [p.lat + dLat, p.lng - dLng],
-          ],
-          { color: p.color, weight: 1.2, dashArray: "3 5", fillColor: p.color, fillOpacity: p.alliance ? 0.07 : 0.03 },
-        )
-          .addTo(lg)
-          .on("click", () => setSel({ t: "peer", id: p.id }));
-        L.marker([p.lat, p.lng], {
-          icon: L.divIcon({ className: "", html: PEER_HTML(p.color, p.handle[1].toUpperCase(), p.online), iconSize: [0, 0] }),
-        })
-          .addTo(lg)
-          .on("click", () => setSel({ t: "peer", id: p.id }));
-      });
+    // ---- neighbours ----------------------------------------------------
+    // Exactly one cast is drawn. When the shared registry answers, it is the
+    // real players + the deterministic AI roster; only when the request fails do
+    // we fall back to the save's generated peers, and the panel says so.
+    if (show.peers) {
+      if (roster.source === "server") {
+        roster.entries.forEach((e) => drawNeighbour(lg, e));
+      } else {
+        state.remote.forEach((p) => {
+          const side = 6.4;
+          const dLat = side / 2 / 110.574;
+          const dLng = side / 2 / (111.32 * Math.cos((p.lat * Math.PI) / 180));
+          L.polygon(
+            [
+              [p.lat - dLat, p.lng - dLng],
+              [p.lat - dLat, p.lng + dLng],
+              [p.lat + dLat, p.lng + dLng],
+              [p.lat + dLat, p.lng - dLng],
+            ],
+            {
+              color: p.color,
+              weight: 1,
+              dashArray: "2 6",
+              opacity: 0.7,
+              fillColor: p.color,
+              fillOpacity: 0.03,
+            },
+          )
+            .addTo(lg)
+            .on("click", () => setSel({ t: "peer", id: p.id }));
+          L.marker([p.lat, p.lng], {
+            icon: L.divIcon({ className: "", html: PEER_HTML(p.color, p.handle[1].toUpperCase(), p.online), iconSize: [0, 0] }),
+          })
+            .addTo(lg)
+            .on("click", () => setSel({ t: "peer", id: p.id }));
+        });
+      }
+    }
+
+    /**
+     * One neighbour = area outline + marker. Outline uses `claimCorners` on the
+     * *coarsened* centre, so it matches the published (approximate) position
+     * rather than a precise one the server never stored.
+     */
+    function drawNeighbour(layer: L.LayerGroup, e: WorldEntry) {
+      const color = safeColor(e.color);
+      const isPlayer = e.kind === "player";
+      L.polygon(claimCorners({ lat: e.lat, lng: e.lng }, e.sideKm), {
+        color,
+        weight: isPlayer ? 1.6 : 1,
+        dashArray: isPlayer ? undefined : "4 6",
+        fillColor: color,
+        fillOpacity: isPlayer ? 0.06 : 0.025,
+      })
+        .addTo(layer)
+        .bindTooltip(neighbourTooltip(e), { className: "spz-popup", sticky: true });
+      L.marker([e.lat, e.lng], {
+        icon: L.divIcon({
+          className: "",
+          html: neighbourNode(e),
+          iconSize: [0, 0],
+        }),
+        // Labels/keys are cheap but not free: keep them out of the tab order.
+        keyboard: false,
+      }).addTo(layer);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [structKey, show, claim]);
+  }, [structKey, show, claim, roster]);
 
   const f = flows(state);
+  // Honest roster status: humans and simulation are counted separately, never
+  // summed into one "players online" figure.
+  const rosterStatus =
+    roster.source === "server"
+      ? `${roster.counts.player} player${roster.counts.player === 1 ? "" : "s"} · ${roster.counts.ai} AI${roster.truncated ? " · truncated" : ""}`
+      : WORLD_LABELS.offline;
 
   return (
     <div className="relative flex h-full min-h-0">
@@ -236,6 +446,7 @@ export default function WorldMap() {
             <div className="num mt-1 text-[10px] text-mist">
               {formatLL(claim.center)} · {claim.sideKm ** 2} km² · placed by {claim.placedBy}
             </div>
+            <SharingRow />
           </div>
 
           <div className="pointer-events-auto flex gap-1">
@@ -270,7 +481,12 @@ export default function WorldMap() {
 
         {/* legend */}
         <div className="pointer-events-none absolute bottom-3 left-3 z-[500] panel-flat px-2.5 py-2">
-          <div className="eyebrow mb-1.5">Legend</div>
+          <div className="eyebrow mb-1.5 flex items-center justify-between gap-3">
+            <span>Legend</span>
+            <span className="num normal-case tracking-normal text-[8.5px] text-dim">
+              {rosterStatus}
+            </span>
+          </div>
           <div className="num flex flex-col gap-1 text-[9.5px] text-mist">
             {Object.values(AREA_META).map((m) => (
               <span key={m.label} className="flex items-center gap-1.5">
@@ -284,7 +500,12 @@ export default function WorldMap() {
               <i className="inline-block h-2 w-2 rounded-full" style={{ background: "#6fb7ff" }} /> Alliance offtaker
             </span>
             <span className="flex items-center gap-1.5">
-              <i className="inline-block h-2.5 w-2" style={{ background: "#a3cb4d", clipPath: "polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)" }} /> Other CEO claim
+              <i className="inline-block h-2.5 w-2" style={{ background: "#a3cb4d", clipPath: "polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)" }} />
+              {WORLD_LABELS.player}
+            </span>
+            <span className="flex items-center gap-1.5">
+              <i className="inline-block h-2.5 w-2.5 rounded-full border border-dashed" style={{ borderColor: "#6fb7ff" }} />
+              {WORLD_LABELS.ai}
             </span>
           </div>
         </div>
@@ -322,6 +543,54 @@ export default function WorldMap() {
       </div>
 
       <Inspector sel={sel} setSel={setSel} f={f} />
+    </div>
+  );
+}
+
+/* ------------------------------- Sharing -------------------------------- */
+
+/**
+ * Opt-in publication of this player's area, plus an honest roster status line.
+ *
+ * Copy comes from `WORLD_LABELS` so the map, the legend and any future screen
+ * cannot drift into claiming more than presence: other players see an
+ * approximate outline, not a live shared simulation.
+ */
+function SharingRow() {
+  const { world, togglePublished, persistence } = useGame();
+  const ready = persistence.phase === "ready";
+
+  return (
+    <div className="mt-1.5 flex flex-col gap-1 border-t border-line/60 pt-1.5">
+      <button
+        onClick={() => void togglePublished()}
+        disabled={!ready || world.busy}
+        className={cn(
+          "num flex items-center gap-1.5 self-start border px-1.5 py-1 text-[9.5px] transition-all duration-200 disabled:opacity-40",
+          world.published
+            ? "border-teal/70 bg-teal/12 text-teal"
+            : "border-line bg-ink-900/70 text-dim hover:text-mist",
+        )}
+        title={
+          world.published
+            ? "Stop sharing your area with other players (deletes the published row)"
+            : "Publish your area so other players see an approximate outline (≈1 km)"
+        }
+      >
+        <Icon.globe size={11} />
+        {world.busy
+          ? "Updating…"
+          : world.published
+            ? "Sharing area · on"
+            : "Share area · off"}
+      </button>
+      <div className="num text-[9px] leading-tight text-dim">
+        {world.published
+          ? world.area
+            ? `Published · ${WORLD_LABELS.player} · ${world.area.sideKm} km side`
+            : WORLD_LABELS.shared
+          : WORLD_LABELS.notShared}
+      </div>
     </div>
   );
 }

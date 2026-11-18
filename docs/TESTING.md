@@ -6,14 +6,15 @@
 | --- | --- |
 | `npm ci` | PASS with `--nodedir=/usr/local`; the plain run fails in this sandbox because node-gyp cannot reach `nodejs.org` for Node headers (network policy, not a repo defect) |
 | `npm run typecheck` (`tsc --noEmit`, strict) | PASS |
-| `npm test` (54 assertions across 6 files) | PASS |
+| `npm test` (75 assertions across 7 files) | PASS |
 | `npm run build` (`next build`, Turbopack) | PASS |
 | `npm run db:migrate` → `0000_init.sql` applied, idempotent on re-run | PASS |
 | `npm run db:backup` → snapshot + `integrity_check: ok` | PASS |
-| `npx tsx scripts/smoke-http.ts` against `next dev` | PASS 11/11 |
-| `npx tsx scripts/smoke-http.ts` against `next start` (port 3100) | PASS 11/11 |
+| `npx tsx scripts/smoke-http.ts` against `next dev` | PASS 20/20 |
+| `npx tsx scripts/smoke-http.ts` against `next start` (port 3100) | PASS 20/20 |
 | Same-database save after a real dev-server restart (`SMOKE_EXPECT_TOKEN`) | PASS 12/12 |
-| Browser gameplay (Leaflet tiles, WebGL interiors, pointer lock, full onboarding) | **NOT RUN** — no browser/GPU tooling in this environment |
+| Browser gameplay (Leaflet tiles, WebGL interiors, pointer lock, full onboarding) | **NOT RUN** — no browser/GPU tooling in this environment (Chromium cannot start: `libnss3` is missing and the sandbox is unprivileged) |
+| Shared-map rendering (neighbour markers/tooltips, 10 s poll, publish toggle in the page) | **NOT RUN** — covered by tests and HTTP smoke, never by a rendered page |
 | Live model/provider evaluation | **NOT RUN** — no authorized provider/key; no player data sent |
 
 **What the automated tests are.** `tests/save-api.test.ts`, `tests/legacy-migration.test.ts`
@@ -24,8 +25,16 @@ integration test: it proves credential containment, allowlisting, timeout and fa
 wiring, not model quality. `tests/save-queue.test.ts` drives the autosave scheduler with
 an injected clock. `tests/client-boundary.test.ts` is a static source audit.
 
+`tests/world-api.test.ts` drives the real world routes against a real database: mutual
+visibility between two cookie jars, ignored client-supplied position/identity, coarsening in
+storage and in responses, opt-out deleting rows, reset withdrawing a publication, bbox and
+limit validation, CSRF/content-type rejection, response-size budget, and AI-roster
+determinism (same seed ⇒ byte-identical, different seed ⇒ different, wide viewports sampled
+without moving survivors).
+
 Compilation and HTTP checks do not prove gameplay correctness, visual fidelity, or
-map/WebGL lifecycle safety.
+map/WebGL lifecycle safety. The shared map's marker DOM, tooltips and poll timing have never
+been observed in a browser.
 
 ## Covered contracts
 

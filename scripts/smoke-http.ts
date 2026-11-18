@@ -48,6 +48,16 @@ class Jar {
 async function main() {
   const { createGame, demoGame } = await import("@/game/engine");
   const { stripSecrets } = await import("@/server/gameSave");
+  // Exact identity for the world checks: the script knows its own session tokens,
+  // so it can compute the same opaque `ref` the server publishes. Asserting on
+  // display names alone would be ambiguous in a dev database that already holds
+  // publications from earlier smoke runs.
+  const { createHash } = await import("node:crypto");
+  const { refForPlayer } = await import("@/game/world");
+  // Mirrors src/server/session.ts:25 (that module is `server-only`, so it cannot
+  // be imported from a script that also pulls in client code).
+  const playerIdFromToken = (token: string) => createHash("sha256").update(token).digest("hex");
+  const refOf = (jar: Jar) => refForPlayer(playerIdFromToken(jar.cookie.replace("simplayz_session=", "")));
 
   // ---- 1. session + create ------------------------------------------------
   const a = new Jar();
@@ -140,7 +150,87 @@ async function main() {
     `code ${advisorBody.error?.code ?? "live"}, ${advisorBody.text.length} chars`,
   );
 
-  // ---- 10. persistence across a restart is verified by --expect-token ----
+  // ---- 10. shared world: two players, one map ---------------------------
+  // A and B are independent cookie jars, i.e. two browsers. This is the exact
+  // reported bug: before the registry, neither could see the other's area.
+  const meA = (await (await a.call("/api/world/me")).json()) as { published: boolean };
+  record("world: unpublished by default", meA.published === false, `published ${meA.published}`);
+
+  // B loads the demo city, whose claim is nowhere near A's. Give B a save next
+  // to A so the "one map" claim is tested on real shared geography.
+  const bNearby = stripSecrets({ ...fresh, company: "SMOKE RIVAL", ceoName: "Rival Test", speed: 0 });
+  const bRewritten = await b.call("/api/save", { method: "PUT", json: { baseRevision: 1, state: bNearby } });
+  record("world: second player re-registers next to the first", bRewritten.status === 200, `status ${bRewritten.status}`);
+
+  const pubA = await a.call("/api/world/publish", { method: "POST", json: { publish: true } });
+  const pubB = await b.call("/api/world/publish", { method: "POST", json: { publish: true } });
+  record(
+    "world: both players publish their area",
+    pubA.status === 200 && pubB.status === 200,
+    `A ${pubA.status}, B ${pubB.status}`,
+  );
+
+  const bbox = "latMin=30&latMax=50&lngMin=-90&lngMax=-60";
+  const worldForB = (await (await b.call(`/api/world?${bbox}&limit=200`)).json()) as {
+    entries: { ref: string; kind: string; display: string }[];
+    counts: { player: number; ai: number };
+  };
+  const refA = refOf(a);
+  const refB = refOf(b);
+  const seesA = worldForB.entries.find((e) => e.ref === refA);
+  record(
+    "world: player B sees player A's area (the reported bug)",
+    Boolean(seesA) && seesA?.kind === "player" && seesA?.display === "SMOKE WORKS",
+    `${worldForB.counts.player} player / ${worldForB.counts.ai} AI entries for B`,
+  );
+
+  const worldForA = (await (await a.call(`/api/world?${bbox}&limit=200`)).json()) as {
+    entries: { ref: string; display: string; kind: string }[];
+    counts: { player: number; ai: number };
+  };
+  record(
+    "world: player A sees player B's area",
+    worldForA.entries.some((e) => e.ref === refB && e.display === "SMOKE RIVAL"),
+    `${worldForA.counts.player} player / ${worldForA.counts.ai} AI entries for A`,
+  );
+  record(
+    "world: a player never sees themselves as a neighbour",
+    !worldForA.entries.some((e) => e.ref === refA),
+    `own ref present: ${worldForA.entries.some((e) => e.ref === refA)}`,
+  );
+
+  const worldText = await (await b.call(`/api/world?${bbox}`)).text();
+  record(
+    "world: response carries no player id and no extra coordinate precision",
+    !/player[_-]?id/i.test(worldText) && !/-?\d+\.\d{3,}/.test(worldText),
+    `${worldText.length} bytes scanned`,
+  );
+
+  // A third, independent session observes both — a player's own query filters
+  // themselves out by design, so B cannot be used to confirm B.
+  const c = new Jar();
+  await c.call("/api/session", { method: "POST", json: {} });
+  const unshare = await a.call("/api/world/publish", { method: "POST", json: { publish: false } });
+  const worldAfterUnshare = (await (await c.call(`/api/world?${bbox}`)).json()) as {
+    entries: { ref: string; display: string; kind: string }[];
+  };
+  record(
+    "world: opting out removes the area from other players",
+    unshare.status === 200 &&
+      !worldAfterUnshare.entries.some((e) => e.ref === refA) &&
+      worldAfterUnshare.entries.some((e) => e.ref === refB),
+    `status ${unshare.status}, A present after opt-out: ${
+      worldAfterUnshare.entries.some((e) => e.ref === refA)
+    }, B still visible: ${worldAfterUnshare.entries.some((e) => e.ref === refB)}`,
+  );
+
+  // Leave the shared dev database as we found it.
+  await b.call("/api/world/publish", { method: "POST", json: { publish: false } });
+
+  const worldNoSession = await new Jar().call(`/api/world?${bbox}`);
+  record("world: unauthenticated read refused", worldNoSession.status === 401, `status ${worldNoSession.status}`);
+
+  // ---- 11. persistence across a restart is verified by --expect-token ----
   const expect = process.env.SMOKE_EXPECT_TOKEN;
   if (expect) {
     const jar = new Jar();
